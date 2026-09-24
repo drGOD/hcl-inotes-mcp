@@ -173,9 +173,17 @@ test("config requires the host and does not invent one", () => {
   assert.equal(config.mailPath, "/mail/user.nsf");
 });
 
-test("treats an iNotes error page as a rejected compose", () => {
+test("accepts a compose only when iNotes returns the send callback", () => {
   const rejected = interpretComposeResponse(200, "<html><title>Error</title><body>Unknown Command Exception</body></html>");
   assert.equal(rejected.accepted, false);
-  const accepted = interpretComposeResponse(200, "<html><title>Mail</title><body>OK</body></html>");
+  const generic = interpretComposeResponse(200, "<html><title>Mail</title><body>OK</body></html>");
+  assert.equal(generic.accepted, false);
+  const shell = interpretComposeResponse(
+    200,
+    "<html><body onload=\"if (window.AAA){if (AAA.DSq.reloading) AAA.DSq.parent.location.reload();}\"></body></html>",
+  );
+  assert.equal(shell.accepted, false);
+  const accepted = interpretComposeResponse(200, read("send-accepted.html"));
   assert.equal(accepted.accepted, true);
+  assert.match(accepted.message, /AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/);
 });

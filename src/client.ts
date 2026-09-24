@@ -64,6 +64,12 @@ export type CreateEventInput = {
 
 type HttpResult = { status: number; url: string; text: string };
 
+type HttpOptions = { userAgent?: string };
+
+/** iNotes returns the memo form only to a browser user agent. A custom agent gets an empty Haiku shell. */
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
 export class InotesError extends Error {
   constructor(message: string) {
     super(message);
@@ -153,24 +159,21 @@ export class InotesClient {
     requireText(input.subject, "Тема");
     requireText(input.body, "Текст");
     if (input.to.length === 0) throw new InotesError("Укажите хотя бы одного получателя.");
-    const url = this.command("($Inbox)/$new/", "EditDocument", {
+    const openUrl = this.command("($Drafts)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
         ["h_EditAction", "h_New"],
         ["s_NotesForm", "Memo"],
-        ["s_ViewName", "($Inbox)"],
+        ["s_ViewName", "($Drafts)"],
       ]),
     });
-    return this.submitCompose(url, {
-      SendTo: input.to.join(", "),
-      CopyTo: (input.cc ?? []).join(", "),
-      BlindCopyTo: (input.bcc ?? []).join(", "),
-      Recipients: input.to.join(", "),
-      Subject: input.subject,
-      Body: normalizeNewlines(input.body),
-      s_NotesForm: "Memo",
-      s_ViewName: "($Inbox)",
+    return this.submitMemo(openUrl, {
+      to: input.to.join(", "),
+      cc: (input.cc ?? []).join(", "),
+      bcc: (input.bcc ?? []).join(", "),
+      subject: input.subject,
+      body: normalizeNewlines(input.body),
     });
   }
 
@@ -379,6 +382,56 @@ export class InotesClient {
     });
   }
 
+  private async submitMemo(
+    openUrl: URL,
+    values: { to: string; cc: string; bcc: string; subject: string; body: string },
+  ): Promise<ComposeResult> {
+    await this.ensureNonce();
+    const browser = { userAgent: BROWSER_USER_AGENT };
+    const page = await this.authed("GET", openUrl, undefined, browser);
+    const nonce = extractNonce(page.text) ?? this.pageNonce ?? this.jar.nonce();
+    const form = parseComposeForm(page.text);
+    if (!form || !("SendTo" in form.fields) || !("Body" in form.fields) || !("Subject" in form.fields)) {
+      return { accepted: false, httpStatus: page.status, message: "iNotes не отдал форму письма (нет SendTo, Subject или Body)." };
+    }
+    if (!nonce) {
+      return { accepted: false, httpStatus: page.status, message: "iNotes не выдал %%Nonce для отправки." };
+    }
+    const fields: Record<string, string> = { ...form.fields };
+    fields.SendTo = values.to;
+    fields.CopyTo = values.cc;
+    fields.BlindCopyTo = values.bcc;
+    fields.Subject = values.subject;
+    fields.Body = values.body;
+    fields.h_Name = values.subject;
+    fields.h_EditAction = "h_Next";
+    fields.h_SetCommand = "h_ShimmerSendMail";
+    fields.MailOptions = "1";
+    fields.SaveOptions = "1";
+    fields.h_SetSaveDoc = "1";
+    fields.h_SetPublishAction = "h_Publish";
+    fields.h_SetPublishToFolder = "";
+    fields.h_SetEditNextScene = "";
+    fields.s_ViewName = "($Drafts)";
+    fields.Form = fields.Form || "Memo";
+    fields["%%Nonce"] = nonce;
+    fields["%%PostCharset"] = "UTF-8";
+    fields.h_SetReturnURL = "[[./&Form=l_CallListenerWithUnid]]";
+    const postUrl = this.command("($Drafts)/$new/", "EditDocument", {
+      Form: "h_PageUI",
+      ui: "dwa_form",
+      PresetFields: presetFields([
+        ["h_EditAction", "h_ShimmerEdit"],
+        ["s_ViewName", "($Drafts)"],
+        ["s_NotesForm", fields.Form],
+      ]),
+    });
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields)) params.set(key, value);
+    const posted = await this.authed("POST", postUrl, params, browser);
+    return interpretComposeResponse(posted.status, posted.text);
+  }
+
   private async submitCompose(
     url: URL,
     overrides: Record<string, string>,
@@ -414,19 +467,20 @@ export class InotesClient {
   }
 
   private async ensureNonce(): Promise<void> {
+    await this.ensureSession();
     if (this.jar.nonce() || this.pageNonce) return;
     const home = await this.authed("GET", this.command("iNotes/Mail/", "OpenDocument", { Form: "m_HomeView" }));
     this.pageNonce = extractNonce(home.text) ?? this.jar.nonce();
   }
 
-  private async authed(method: "GET" | "POST", url: URL, body?: URLSearchParams): Promise<HttpResult> {
+  private async authed(method: "GET" | "POST", url: URL, body?: URLSearchParams, options?: HttpOptions): Promise<HttpResult> {
     await this.ensureSession();
-    let response = await this.request(method, url, body);
+    let response = await this.request(method, url, body, options);
     if (isLoginPage(response.text) && this.config.username && this.config.password && !this.config.cookie) {
       this.sessionReady = false;
       this.sessionPromise = undefined;
       await this.ensureSession();
-      response = await this.request(method, url, body);
+      response = await this.request(method, url, body, options);
     }
     if (isLoginPage(response.text)) {
       throw new InotesError("iNotes вернул страницу входа. Сессия недействительна или не хватает прав.");
@@ -477,7 +531,7 @@ export class InotesClient {
     this.sessionReady = true;
   }
 
-  private async request(method: "GET" | "POST", url: URL, body?: URLSearchParams): Promise<HttpResult> {
+  private async request(method: "GET" | "POST", url: URL, body?: URLSearchParams, options?: HttpOptions): Promise<HttpResult> {
     let current = url;
     let verb = method;
     let payload = body;
@@ -485,7 +539,7 @@ export class InotesClient {
       this.assertSameOrigin(current);
       const headers = new Headers();
       headers.set("Accept", "text/html,application/json,application/xml;q=0.9,*/*;q=0.8");
-      headers.set("User-Agent", "inotes-mcp/1.0");
+      headers.set("User-Agent", options?.userAgent ?? "inotes-mcp/1.0");
       const cookie = this.jar.header();
       if (cookie) headers.set("Cookie", cookie);
       let reqBody: string | undefined;

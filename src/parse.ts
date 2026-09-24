@@ -315,6 +315,8 @@ export function extractNonce(html: string): string | undefined {
   return fromCookie?.[1];
 }
 
+const SEND_ACCEPTED = /setTimeout\(\s*(?:function\s*\(\)\s*\{\s*)?DhU\.onDatasetComplete\b/;
+
 export function interpretComposeResponse(status: number, text: string): ComposeResult {
   const summary = summarizeServerText(text);
   if (isLoginPage(text)) {
@@ -323,12 +325,24 @@ export function interpretComposeResponse(status: number, text: string): ComposeR
   if (status >= 400 || /unknown command/i.test(text) || /<title>[^<]*error[^<]*<\/title>/i.test(text)) {
     return { accepted: false, httpStatus: status, message: summary || `HTTP ${status}` };
   }
-  const jsonError = text.match(/"(?:errorMessage|errorText|errMsg)"\s*:\s*"([^"]+)"/i);
+  const jsonError = text.match(/"(?:errorMessage|errorText|errMsg|sErrorProblem|sErrorStatus)"\s*:\s*"([^"]+)"/i);
   if (jsonError?.[1]) return { accepted: false, httpStatus: status, message: decodeHtml(jsonError[1]) };
+  if (!SEND_ACCEPTED.test(text)) {
+    return {
+      accepted: false,
+      httpStatus: status,
+      message: summary
+        ? `iNotes не подтвердил отправку. ${summary}`
+        : "iNotes не подтвердил отправку: в ответе нет DhU.onDatasetComplete.",
+    };
+  }
+  const unid = text.match(/\bsUnid\s*=\s*['"]([0-9A-Fa-f]{32})['"]/i)?.[1]?.toUpperCase();
   return {
     accepted: true,
     httpStatus: status,
-    message: "iNotes принял отправку формы (страницы ошибки нет). Это не квитанция о доставке.",
+    message: unid
+      ? `iNotes принял письмо (${unid}). Это не квитанция о доставке.`
+      : "iNotes принял письмо (ответ с onDatasetComplete). Это не квитанция о доставке.",
   };
 }
 
