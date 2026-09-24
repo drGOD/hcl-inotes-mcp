@@ -142,6 +142,25 @@ export function parseViewEntries(payload: string): ViewEntries {
   return { recognized: false, entries: [] };
 }
 
+const DATE_COLUMN_NAMES = ["$70", "$62", "$146", "PostedDate", "DeliveredDate"];
+const SIZE_COLUMN_NAMES = new Set(["$106", "size"]);
+
+export function dateColumnNumber(entries: ViewEntry[]): number | undefined {
+  for (const name of DATE_COLUMN_NAMES) {
+    for (const entry of entries) {
+      const column = entry.columns.find((item) => item.name?.toLowerCase() === name.toLowerCase());
+      if (column && Number.isFinite(column.column)) return column.column;
+    }
+  }
+  for (const entry of entries) {
+    const dated = entry.columns.find(
+      (item) => item.type === "datetime" && !SIZE_COLUMN_NAMES.has((item.name ?? "").toLowerCase()) && Number.isFinite(item.column),
+    );
+    if (dated) return dated.column;
+  }
+  return undefined;
+}
+
 export function toMailList(folder: string, start: number, view: ViewEntries): MailList {
   return {
     folder,
@@ -152,9 +171,9 @@ export function toMailList(folder: string, start: number, view: ViewEntries): Ma
       noteId: entry.noteId,
       position: entry.position,
       unread: entry.unread,
-      from: columnByName(entry, ["$93", "$98", "From", "$23"]),
-      subject: columnByName(entry, ["$73", "Subject"]),
-      date: normalizeMaybeDate(columnByName(entry, ["$70", "$146", "PostedDate", "DeliveredDate"])),
+      from: columnByName(entry, ["$93", "$98", "From", "$23", "$82"]),
+      subject: columnByName(entry, ["$73", "Subject", "$65"]),
+      date: normalizeMaybeDate(columnByName(entry, ["$70", "$62", "$146", "PostedDate", "DeliveredDate"])),
       size: toSize(columnByName(entry, ["$106", "Size"])),
     })),
   };

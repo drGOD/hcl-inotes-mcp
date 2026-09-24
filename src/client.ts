@@ -11,6 +11,7 @@ import {
   parseJsVars,
   parseLoginForm,
   parseOutline,
+  dateColumnNumber,
   parseViewEntries,
   summarizeServerText,
   toContacts,
@@ -72,6 +73,7 @@ export class InotesError extends Error {
 
 export class InotesClient {
   private readonly jar = new CookieJar();
+  private readonly dateColumnByFolder = new Map<string, number>();
   private sessionReady = false;
   private sessionPromise: Promise<void> | undefined;
   private pageNonce: string | undefined;
@@ -111,7 +113,7 @@ export class InotesClient {
       ["UnreadCountInfo", "1"],
     ];
     if (options.unreadOnly) pairs.push(["UnreadOnly", "1"]);
-    const view = await this.readView(folder, pairs, start, limit, { resortDescending: "5" });
+    const view = await this.readView(folder, pairs, start, limit, { sortByDate: true });
     return toMailList(folder, start, view);
   }
 
@@ -129,7 +131,7 @@ export class InotesClient {
       ],
       start,
       limit,
-      { resortDescending: "5" },
+      { sortByDate: true },
     );
     return toMailList(folder, start, view);
   }
@@ -332,7 +334,7 @@ export class InotesClient {
     pairs: Array<[string, string]>,
     start: number,
     limit: number,
-    options: { resortDescending?: string },
+    options: { sortByDate?: boolean },
   ) {
     const params: Record<string, string> = {
       Form: "s_ReadViewEntries",
@@ -342,13 +344,28 @@ export class InotesClient {
       TZType: "UTC",
       charset: "UTF-8",
     };
-    if (options.resortDescending) params.resortdescending = options.resortDescending;
+    if (options.sortByDate) {
+      const column = await this.dateColumn(folder, pairs);
+      if (column != null) params.resortdescending = String(column);
+    }
     const response = await this.authed("GET", this.command("iNotes/Proxy/", "OpenDocument", params));
     const parsed = parseViewEntries(response.text);
     if (!parsed.recognized) {
       throw new InotesError(`Представление ${folder} не прочитано. ${summarizeServerText(response.text) || `HTTP ${response.status}`}`);
     }
     return parsed;
+  }
+
+  private async dateColumn(folder: string, pairs: Array<[string, string]>): Promise<number | undefined> {
+    const cached = this.dateColumnByFolder.get(folder);
+    if (cached != null) return cached;
+    const probePairs = pairs.filter(([key]) => key === "FolderName" || key === "UnreadCountInfo");
+    const response = await this.authed("GET", this.viewUrl(probePairs.length > 0 ? probePairs : [["FolderName", folder]], 1, 5));
+    const parsed = parseViewEntries(response.text);
+    if (!parsed.recognized) return undefined;
+    const column = dateColumnNumber(parsed.entries);
+    if (column != null) this.dateColumnByFolder.set(folder, column);
+    return column;
   }
 
   private viewUrl(pairs: Array<[string, string]>, start: number, limit: number) {
