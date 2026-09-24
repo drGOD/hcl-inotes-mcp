@@ -666,6 +666,7 @@ function eventFields(source: string): Record<string, unknown> {
   assign("AppointmentType", items.AppointmentType);
   assign("Form", items.Form);
   assign("Location", firstPlace(items.Location, items.Room, items.STRoomName));
+  assign("STUnyteConferenceURL", items.STUnyteConferenceURL);
   assign("Body", items.Body);
   return fields;
 }

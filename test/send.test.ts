@@ -222,6 +222,7 @@ test("read_event reloads the iNotes shell and reads appointment times", async ()
     '{"@name":"ENDDATETIME","text":{"0":"20260929T120000,00Z"}}',
     '{"@name":"STRoomName","text":{"0":"-"}}',
     '{"@name":"AppointmentType","text":{"0":"0"}}',
+    '{"@name":"STUnyteConferenceURL","textlist":{"text":[{"0":"https://meet.example.com/room"}]}}',
   ].join(",");
   globalThis.fetch = async (input) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
@@ -237,6 +238,7 @@ test("read_event reloads the iNotes shell and reads appointment times", async ()
     assert.equal(event.end, "2026-09-29T12:00:00Z");
     assert.equal(event.location, undefined);
     assert.equal(event.body, undefined);
+    assert.equal(event.onlineMeetingUrl, "https://meet.example.com/room");
   } finally {
     globalThis.fetch = original;
   }

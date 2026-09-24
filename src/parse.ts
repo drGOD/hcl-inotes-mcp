@@ -74,6 +74,7 @@ export type EventDetails = MessageContent & {
   start?: string;
   end?: string;
   appointmentType?: string;
+  onlineMeetingUrl?: string;
 };
 
 export type FolderInfo = {
@@ -312,12 +313,14 @@ export function interpretMessage(input: { unid?: string; fields?: Record<string,
 
 export function interpretEvent(input: { unid?: string; fields?: Record<string, unknown>; bodyHtml?: string }): EventDetails {
   const fields = input.fields ?? {};
+  const onlineMeetingUrl = httpUrl(fieldString(fields, "STUnyteConferenceURL"));
   return {
     ...interpretMessage(input),
     location: fieldString(fields, "Location") ?? fieldString(fields, "Room"),
     start: fieldString(fields, "StartDateTime") ?? fieldString(fields, "StartDate"),
     end: fieldString(fields, "EndDateTime") ?? fieldString(fields, "EndDate"),
     appointmentType: fieldString(fields, "AppointmentType"),
+    ...(onlineMeetingUrl ? { onlineMeetingUrl } : {}),
   };
 }
 
@@ -694,6 +697,12 @@ function extractMailBodyHtml(html: string): string {
     html.match(/<div[^>]+id=["']messageBody["'][^>]*>([\s\S]*?)<\/div>/i) ??
     html.match(/<div[^>]+class=["'][^"']*memo-body[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
   return marked?.[1] ?? html;
+}
+
+function httpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 function fieldString(fields: Record<string, unknown>, key: string): string | undefined {

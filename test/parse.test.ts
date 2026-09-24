@@ -11,6 +11,7 @@ import {
   interpretComposeResponse,
   parseDominoItems,
   replySubject,
+  interpretEvent,
   interpretMessage,
   isLoginPage,
   parseJsVars,
@@ -179,6 +180,19 @@ test("reads a calendar end time when the display column is a dash", () => {
   assert.equal(events[0]?.start, "2026-09-29T11:00:00Z");
   assert.equal(events[0]?.end, "2026-09-29T12:00:00Z");
   assert.equal(events[0]?.location, undefined);
+});
+
+test("reads the online meeting URL and ignores a field that is not a URL", () => {
+  const event = interpretEvent({
+    unid: "0123456789ABCDEF0123456789ABCDEF",
+    fields: {
+      Subject: "Планёрка",
+      STUnyteConferenceURL: "https://meet.example.com/room",
+    },
+  });
+  assert.equal(event.onlineMeetingUrl, "https://meet.example.com/room");
+  const plain = interpretEvent({ fields: { STUnyteConferenceURL: "1", OnlineMeeting: "1" } });
+  assert.equal(plain.onlineMeetingUrl, undefined);
 });
 
 test("converts Domino calendar datetimes", () => {
