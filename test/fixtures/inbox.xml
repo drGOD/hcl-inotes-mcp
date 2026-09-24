@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<viewentries toplevelentries="1">
+  <viewentry position="1" unid="A1B2C3D4E5F60718293A4B5C6D7E8F90" noteid="12A" unread="true" siblings="1">
+    <entrydata columnnumber="1" name="$93"><text>Иван Петров</text></entrydata>
+    <entrydata columnnumber="2" name="$73"><text>Протокол планёрки</text></entrydata>
+    <entrydata columnnumber="3" name="$70"><datetime>20260924T060000,00Z</datetime></entrydata>
+    <entrydata columnnumber="4" name="$106"><number>4096</number></entrydata>
+  </viewentry>
+</viewentries>

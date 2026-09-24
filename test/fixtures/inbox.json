@@ -1,0 +1,36 @@
+{
+  "@timestamp": "20260924T085800,00Z",
+  "@toplevelentries": "2",
+  "viewentry": [
+    {
+      "@position": "1",
+      "@unid": "A1B2C3D4E5F60718293A4B5C6D7E8F90",
+      "@noteid": "12A",
+      "@unread": "true",
+      "@siblings": "2",
+      "entrydata": [
+        { "@columnnumber": "0", "@name": "$86", "number": { "0": "170" } },
+        { "@columnnumber": "1", "@name": "$93", "text": { "0": "Иван Петров" } },
+        { "@columnnumber": "2", "@name": "$73", "text": { "0": "Протокол планёрки" } },
+        { "@columnnumber": "3", "@name": "$70", "datetime": { "0": "20260924T060000,00Z" } },
+        { "@columnnumber": "4", "@name": "$106", "number": { "0": "4096" } }
+      ]
+    },
+    {
+      "@position": "2",
+      "@unid": "0123456789ABCDEF0123456789ABCDEF",
+      "@noteid": "12B",
+      "entrydata": [
+        { "@columnnumber": "0", "@name": "$86", "number": { "0": "82" } },
+        { "@columnnumber": "1", "@name": "$93", "text": "Анна Смирнова" },
+        {
+          "@columnnumber": "2",
+          "@name": "$73",
+          "textlist": { "text": [{ "0": "Счёт" }, { "1": "за сентябрь" }] }
+        },
+        { "@columnnumber": "3", "@name": "$70", "datetime": "20260923T150000,00Z" },
+        { "@columnnumber": "4", "@name": "$106", "text": { "0": "12000" } }
+      ]
+    }
+  ]
+}
