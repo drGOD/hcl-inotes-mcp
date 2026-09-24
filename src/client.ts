@@ -1,6 +1,6 @@
 import { CookieJar } from "./cookies.js";
 import type { InotesConfig } from "./config.js";
-import { fromDominoDateTime, toDatePart, toDominoDateTime, toDominoKey, toTimePart } from "./dates.js";
+import { fromDominoDateTime, toDominoDateTime, toDominoKey } from "./dates.js";
 import {
   extractNonce,
   htmlToText,
@@ -64,6 +64,7 @@ export type CreateEventInput = {
   kind?: "appointment" | "meeting";
   allDay?: boolean;
   attendees?: string[];
+  onlineMeetingUrl?: string;
 };
 
 type HttpResult = { status: number; url: string; text: string };
@@ -334,8 +335,12 @@ export class InotesClient {
     const end = new Date(input.end);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new InotesError("Нужны даты начала и окончания в ISO 8601.");
     if (end.getTime() < start.getTime()) throw new InotesError("Окончание события раньше начала.");
+    const onlineMeetingUrl = input.onlineMeetingUrl?.trim() ?? "";
+    if (onlineMeetingUrl && !/^https?:\/\//i.test(onlineMeetingUrl)) {
+      throw new InotesError("Ссылка сетевого собрания должна начинаться с http:// или https://.");
+    }
     const appointmentType = input.allDay ? "2" : input.kind === "meeting" ? "3" : "0";
-    const url = this.command("($Calendar)/$new/", "EditDocument", {
+    const openUrl = this.command("($Calendar)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
@@ -345,27 +350,15 @@ export class InotesClient {
         ["AppointmentType", appointmentType],
       ]),
     });
-    const attendees = input.attendees ?? [];
-    const overrides: Record<string, string> = {
-      Subject: input.subject,
-      Body: normalizeNewlines(input.body ?? ""),
-      Location: input.location ?? "",
-      AppointmentType: appointmentType,
-      StartDateTime: toDominoDateTime(input.start),
-      EndDateTime: toDominoDateTime(input.end),
-      CalendarDateTime: toDominoDateTime(input.start),
-      StartDate: toDatePart(input.start),
-      EndDate: toDatePart(input.end),
-      StartTime: toTimePart(input.start),
-      EndTime: toTimePart(input.end),
-      s_NotesForm: "Appointment",
-      s_ViewName: "($Calendar)",
-    };
-    if (input.kind === "meeting" && attendees.length > 0) {
-      overrides.RequiredAttendees = attendees.join(", ");
-      overrides.SendTo = attendees.join(", ");
-    }
-    return this.submitCompose(url, overrides);
+    return this.submitAppointment(openUrl, {
+      subject: input.subject,
+      body: input.body ?? "",
+      location: input.location ?? "",
+      appointmentType,
+      start: toDominoDateTime(input.start),
+      end: toDominoDateTime(input.end),
+      onlineMeetingUrl,
+    });
   }
 
   private async readView(
@@ -467,6 +460,106 @@ export class InotesClient {
       PresetFields: presetFields([
         ["h_EditAction", "h_ShimmerEdit"],
         ["s_ViewName", "($Drafts)"],
+        ["s_NotesForm", fields.Form],
+      ]),
+    });
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields)) params.set(key, value);
+    const posted = await this.authed("POST", postUrl, params, browser);
+    return interpretComposeResponse(posted.status, posted.text);
+  }
+
+  private async submitAppointment(
+    openUrl: URL,
+    values: {
+      subject: string;
+      body: string;
+      location: string;
+      appointmentType: string;
+      start: string;
+      end: string;
+      onlineMeetingUrl: string;
+    },
+  ): Promise<ComposeResult> {
+    await this.ensureNonce();
+    const browser = { userAgent: BROWSER_USER_AGENT };
+    const page = await this.authed("GET", openUrl, undefined, browser);
+    const nonce = extractNonce(page.text) ?? this.pageNonce ?? this.jar.nonce();
+    const form = parseComposeForm(page.text);
+    if (!form || !("Subject" in form.fields) || !("StartDate" in form.fields) || !("STUnyteConferenceURL" in form.fields)) {
+      return { accepted: false, httpStatus: page.status, message: "iNotes не отдал форму события (нет Subject, StartDate или STUnyteConferenceURL)." };
+    }
+    if (!nonce) {
+      return { accepted: false, httpStatus: page.status, message: "iNotes не выдал %%Nonce для сохранения события." };
+    }
+    const fields: Record<string, string> = { ...form.fields };
+    const set = (key: string, value: string) => {
+      fields[key] = value;
+    };
+    set("Subject", values.subject);
+    set("s_NewSubject", values.subject);
+    set("h_Name", values.subject);
+    set("Body", values.body);
+    set("Location", values.location);
+    set("s_NewLocation", values.location);
+    set("AppointmentType", values.appointmentType);
+    set("StartDate", values.start);
+    set("EndDate", values.end);
+    set("NewStartDate", values.start);
+    set("NewEndDate", values.end);
+    set("ThisStartDate", values.start);
+    set("ThisEndDate", values.end);
+    set("h_EditAction", "h_Next");
+    set("h_SetCommand", "h_ShimmerSave");
+    set("MailOptions", "0");
+    set("SaveOptions", "1");
+    set("h_SetSaveDoc", "1");
+    set("h_SetPublishAction", "h_Publish");
+    set("h_SetPublishToFolder", "");
+    set("h_SetEditNextScene", "");
+    set("s_ViewName", "($Calendar)");
+    set("Form", fields.Form || "Appointment");
+    set("s_SendNotice", "0");
+    set("h_MeetingCommand", "");
+    for (const key of [
+      "RequiredAttendees",
+      "OptionalAttendees",
+      "FYIAttendees",
+      "EnterSendTo",
+      "EnterCopyTo",
+      "EnterBlindCopyTo",
+      "s_NewRequiredAttendees",
+      "s_NewOptionalAttendees",
+      "s_NewFYIAttendees",
+      "s_NewAltRequiredAttendees",
+      "s_NewAltOptionalAttendees",
+      "s_NewAltFYIAttendees",
+      "Resources",
+      "RequiredResources",
+    ]) {
+      if (key in fields) fields[key] = "";
+    }
+    set("Alarms", "0");
+    set("$Alarm", "0");
+    set("$AlarmSendTo", "");
+    set("h_AlarmOn", "");
+    if (values.onlineMeetingUrl) {
+      set("OnlineMeeting", "1");
+      set("s_NewOnlineMeeting", "1");
+      set("SametimeType", "9");
+      set("s_NewSametimeType", "9");
+      set("STUnyteConferenceURL", values.onlineMeetingUrl);
+      set("s_NewSTUnyteConferenceURL", values.onlineMeetingUrl);
+    }
+    set("%%Nonce", nonce);
+    set("%%PostCharset", "UTF-8");
+    set("h_SetReturnURL", "[[./&Form=l_CallListenerWithUnid]]");
+    const postUrl = this.command("($Calendar)/$new/", "EditDocument", {
+      Form: "h_PageUI",
+      ui: "dwa_form",
+      PresetFields: presetFields([
+        ["h_EditAction", "h_ShimmerEdit"],
+        ["s_ViewName", "($Calendar)"],
         ["s_NotesForm", fields.Form],
       ]),
     });

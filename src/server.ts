@@ -183,6 +183,7 @@ export function createServer(client: InotesClient): McpServer {
         end: z.string().trim().describe("Окончание, ISO 8601."),
         body: z.string().max(200_000).optional(),
         location: z.string().max(500).optional(),
+        onlineMeetingUrl: z.string().trim().max(2000).optional().describe("Ссылка «Сетевое собрание», https URL."),
         kind: z.enum(["appointment", "meeting"]).optional(),
         allDay: z.boolean().optional(),
         attendees: z.array(z.string().trim().min(1)).optional(),

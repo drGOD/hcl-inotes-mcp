@@ -243,3 +243,69 @@ test("read_event reloads the iNotes shell and reads appointment times", async ()
     globalThis.fetch = original;
   }
 });
+
+test("create_event saves an appointment with the conference URL and does not invite", async () => {
+  const calls: Array<{ url: URL; method: string; body: string }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method, body: typeof init?.body === "string" ? init.body : "" });
+    if (method === "POST") return new Response(read("send-accepted.html"), { status: 200 });
+    return new Response(read("appointment-form.html"), { status: 200 });
+  };
+  try {
+    const result = await new InotesClient(config).createEvent({
+      subject: "Проверка ВКС",
+      start: "2026-09-25T10:00:00+03:00",
+      end: "2026-09-25T11:00:00+03:00",
+      onlineMeetingUrl: "https://test.com/test",
+    });
+    assert.equal(result.accepted, true);
+    const posted = calls.find((call) => call.method === "POST");
+    assert.match(decodeURIComponent(posted?.url.pathname ?? ""), /\/\(\$Calendar\)\/\$new\/$/);
+    assert.match(posted?.url.search ?? "", /h_EditAction;h_ShimmerEdit/);
+    assert.match(posted?.url.search ?? "", /s_NotesForm;Appointment/);
+    const fields = new URLSearchParams(posted?.body ?? "");
+    assert.equal(fields.get("Subject"), "Проверка ВКС");
+    assert.equal(fields.get("StartDate"), "20260925T070000,00Z");
+    assert.equal(fields.get("EndDate"), "20260925T080000,00Z");
+    assert.equal(fields.get("STUnyteConferenceURL"), "https://test.com/test");
+    assert.equal(fields.get("s_NewSTUnyteConferenceURL"), "https://test.com/test");
+    assert.equal(fields.get("OnlineMeeting"), "1");
+    assert.equal(fields.get("h_SetCommand"), "h_ShimmerSave");
+    assert.equal(fields.get("MailOptions"), "0");
+    assert.equal(fields.get("s_SendNotice"), "0");
+    assert.equal(fields.get("RequiredAttendees"), "");
+    assert.equal(fields.get("EnterSendTo"), "");
+    assert.equal(fields.get("$AlarmSendTo"), "");
+    assert.equal(fields.get("Alarms"), "0");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("create_event does not treat a generic 200 page as a saved appointment", async () => {
+  const original = globalThis.fetch;
+  let posts = 0;
+  globalThis.fetch = async (_input, init) => {
+    if ((init?.method ?? "GET") === "POST") {
+      posts += 1;
+      return new Response("<html><title>Form processed</title><body><h1>Form processed</h1></body></html>", { status: 200 });
+    }
+    return new Response(read("appointment-form.html"), { status: 200 });
+  };
+  try {
+    const result = await new InotesClient(config).createEvent({
+      subject: "Проверка ВКС",
+      start: "2026-09-25T10:00:00+03:00",
+      end: "2026-09-25T11:00:00+03:00",
+      onlineMeetingUrl: "https://meet.example.com/room",
+    });
+    assert.equal(result.accepted, false);
+    assert.equal(posts, 1);
+    assert.match(result.message, /DhU\.onDatasetComplete|Form processed/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
