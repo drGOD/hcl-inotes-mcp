@@ -18,6 +18,8 @@ import {
   parseOutline,
   dateColumnNumber,
   parseViewEntries,
+  documentPlainText,
+  parseDirectorySearch,
   summarizeServerText,
   toContacts,
   toEvents,
@@ -297,6 +299,8 @@ export class InotesClient {
     if (query && query.length > 200) throw new InotesError("Запрос поиска контактов должен быть не длиннее 200 символов.");
     const start = positiveInt(options.start, 1);
     const limit = bounded(options.limit, query ? 50 : 50, 1, 100);
+    const directory = this.config.directory?.trim();
+    if (directory) return this.listDirectoryContacts(directory, { query, start, limit });
     const fetchCount = query ? Math.max(limit, 100) : limit;
     let lastSummary = "";
     for (const viewName of ["($Contacts)", "($People)"]) {
@@ -318,6 +322,52 @@ export class InotesClient {
     throw new InotesError(
       `Личная адресная книга недоступна через этот почтовый файл. ${lastSummary}`.trim(),
     );
+  }
+
+  private async listDirectoryContacts(
+    directory: string,
+    options: { query?: string; start: number; limit: number },
+  ): Promise<{ view: string; contacts: Contact[] }> {
+    const about = await this.authed("GET", new URL("/names.nsf/$about?OpenAbout", this.config.baseUrl));
+    const title = documentPlainText(about.text);
+    if (about.status >= 400 || !title.toLowerCase().startsWith(directory.toLowerCase())) {
+      throw new InotesError(
+        `Каталог «${directory}» не найден. Укажите в INOTES_DIRECTORY имя из окна «Выбрать адреса», поле «Искать в».`,
+      );
+    }
+    const { query, start, limit } = options;
+    if (query) {
+      const searchMax = Math.min(200, Math.max(limit, start + limit - 1));
+      const response = await this.authed(
+        "GET",
+        inotesCommandUrl(this.config.baseUrl, "/names.nsf", "People", "SearchView", {
+          Query: query,
+          SearchMax: String(searchMax),
+          OutputFormat: "JSON",
+        }),
+      );
+      if (response.status >= 400) {
+        throw new InotesError(`Каталог «${directory}» не прочитан. ${summarizeServerText(response.text) || `HTTP ${response.status}`}`);
+      }
+      const parsed = parseViewEntries(response.text);
+      let contacts = parsed.recognized ? toContacts(parsed) : parseDirectorySearch(response.text);
+      const needle = query.toLowerCase();
+      contacts = contacts.filter((contact) => contactHaystack(contact).includes(needle));
+      return { view: directory, contacts: contacts.slice(start - 1, start - 1 + limit) };
+    }
+    const response = await this.authed(
+      "GET",
+      inotesCommandUrl(this.config.baseUrl, "/names.nsf", "People", "ReadViewEntries", {
+        OutputFormat: "JSON",
+        Start: String(start),
+        Count: String(limit),
+      }),
+    );
+    const parsed = parseViewEntries(response.text);
+    if (!parsed.recognized) {
+      throw new InotesError(`Каталог «${directory}» не прочитан. ${summarizeServerText(response.text) || `HTTP ${response.status}`}`);
+    }
+    return { view: directory, contacts: toContacts(parsed).slice(0, limit) };
   }
 
   async listEvents(options: { start: string; end: string; limit?: number }): Promise<CalendarEvent[]> {

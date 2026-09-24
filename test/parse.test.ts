@@ -225,6 +225,21 @@ test("config requires the host and does not invent one", () => {
   });
   assert.equal(config.baseUrl, "https://mail.example.com");
   assert.equal(config.mailPath, "/mail/user.nsf");
+  assert.equal(config.directory, undefined);
+  const named = loadConfig({
+    INOTES_BASE_URL: "https://mail.example.com",
+    INOTES_MAIL_PATH: "/mail/user.nsf",
+    INOTES_COOKIE: "DomAuthSessId=example",
+    INOTES_DIRECTORY: "  Example Directory  ",
+  });
+  assert.equal(named.directory, "Example Directory");
+  const blank = loadConfig({
+    INOTES_BASE_URL: "https://mail.example.com",
+    INOTES_MAIL_PATH: "/mail/user.nsf",
+    INOTES_COOKIE: "DomAuthSessId=example",
+    INOTES_DIRECTORY: "   ",
+  });
+  assert.equal(blank.directory, undefined);
 });
 
 test("reads reply fields from Domino @name items", () => {

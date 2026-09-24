@@ -4,6 +4,8 @@ export type InotesConfig = {
   username?: string;
   password?: string;
   cookie?: string;
+  /** Address-book name from the iNotes picker. Empty means the personal book. */
+  directory?: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): InotesConfig {
@@ -35,11 +37,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): InotesConfig {
     throw new Error("Задайте INOTES_COOKIE либо пару INOTES_USERNAME и INOTES_PASSWORD.");
   }
 
+  const directory = env.INOTES_DIRECTORY?.trim() || undefined;
+
   return {
     baseUrl: base.origin,
     mailPath: mailPathRaw.replace(/\/+$/, ""),
     username,
     password: hasPassword ? password : undefined,
     cookie,
+    directory,
   };
 }

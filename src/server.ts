@@ -121,7 +121,8 @@ export function createServer(client: InotesClient): McpServer {
     "list_contacts",
     {
       title: "Список контактов",
-      description: "Контакты личной адресной книги в почтовом файле: представления ($Contacts) или ($People).",
+      description:
+        "Если задан INOTES_DIRECTORY — контакты этого каталога (имя из окна «Выбрать адреса», поле «Искать в»). Иначе личная книга почтового файла: ($Contacts), затем ($People).",
       inputSchema: z.object({ start, limit }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -132,7 +133,8 @@ export function createServer(client: InotesClient): McpServer {
     "search_contacts",
     {
       title: "Поиск контактов",
-      description: "Ищет контакт в личной адресной книге iNotes по имени, адресу или компании.",
+      description:
+        "Ищет контакт по имени, адресу или компании. Если задан INOTES_DIRECTORY — в этом каталоге, иначе в личной адресной книге.",
       inputSchema: z.object({
         query: z.string().trim().min(1).max(200),
         limit,

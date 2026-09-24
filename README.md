@@ -19,8 +19,11 @@ cp .env.example .env
 | `INOTES_USERNAME` | Имя с формы входа iNotes (поле `Username`) |
 | `INOTES_PASSWORD` | Пароль с той же формы |
 | `INOTES_COOKIE` | Вместо имени и пароля: заголовок `Cookie` уже открытой своей сессии |
+| `INOTES_DIRECTORY` | Имя каталога из окна iNotes «Выбрать адреса», поле «Искать в». Пример: `Example Directory`. Пустое значение оставляет личную книгу `($Contacts)` |
 
 Достаточно одного способа входа.
+
+`INOTES_DIRECTORY` заполните именем, которое iNotes показывает в окне «Выбрать адреса» в поле «Искать в». Пример: `Example Directory`. Берите имя из своего окна, а не из чужого описания. Если переменная пустая или не задана, `search_contacts` и `list_contacts` читают личную адресную книгу почтового файла.
 
 Форма на `mail.example.com` — стандартный вход Domino: `POST /names.nsf?Login`, поля `Username`, `Password`, `RedirectTo`, скрытое `%%ModDate`. Имя — то же, что вы вводите в браузере, а не обязательно краткое имя файла.
 
@@ -52,7 +55,8 @@ npm start
         "INOTES_BASE_URL": "https://mail.example.com",
         "INOTES_MAIL_PATH": "/mail/MAILFILE.nsf",
         "INOTES_USERNAME": "имя с формы входа",
-        "INOTES_PASSWORD": "пароль"
+        "INOTES_PASSWORD": "пароль",
+        "INOTES_DIRECTORY": "Example Directory"
       }
     }
   }
@@ -72,8 +76,8 @@ npm start
 | `send_mail` | Новое письмо, форма Memo / `h_PageUI` |
 | `reply_mail` | Ответ или ответ всем (`h_Reply`, `h_ReplyAll`) |
 | `forward_mail` | Пересылка (`h_Forward`) через `($Drafts)/$new` |
-| `list_contacts` | Личная адресная книга в почтовом файле: `($Contacts)`, затем `($People)` |
-| `search_contacts` | Поиск по этой адресной книге |
+| `list_contacts` | Каталог из `INOTES_DIRECTORY`, если он задан; иначе личная книга `($Contacts)`, затем `($People)` |
+| `search_contacts` | Поиск в том же каталоге или в личной книге |
 | `list_events` | События `($Calendar)` за диапазон дат |
 | `read_event` | Одно событие по UNID; для повторения можно указать начало экземпляра |
 | `create_event` | Событие, встреча или день целиком через форму Appointment, если iNotes её отдаёт |

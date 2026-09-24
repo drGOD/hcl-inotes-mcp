@@ -180,6 +180,48 @@ export function toMailList(folder: string, start: number, view: ViewEntries): Ma
   };
 }
 
+/** Visible text of an HTML page, with tags and entities removed. */
+export function documentPlainText(html: string): string {
+  return decodeHtml(
+    html
+      .replace(/^\uFEFF/, "")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " "),
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * People SearchView answers with HTML even when OutputFormat=JSON.
+ * Each hit is an OpenDocument anchor; the 32-hex path segment is the UNID.
+ */
+export function parseDirectorySearch(html: string): Contact[] {
+  const contacts: Contact[] = [];
+  const seen = new Set<string>();
+  const anchorRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  for (const match of html.matchAll(anchorRe)) {
+    const href = attr(match[1] ?? "", "href");
+    if (!href || !/opendocument/i.test(href)) continue;
+    const unid = directoryUnid(href);
+    const name = decodeHtml((match[2] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    if (!unid || !name || seen.has(unid)) continue;
+    seen.add(unid);
+    contacts.push({ unid, name, fields: { Name: name } });
+  }
+  return contacts;
+}
+
+function directoryUnid(href: string): string | undefined {
+  const path = href.split(/[?#]/, 1)[0] ?? href;
+  const segment = path
+    .split("/")
+    .reverse()
+    .find((part) => /^[0-9a-f]{32}$/i.test(part));
+  return segment?.toUpperCase();
+}
+
 export function toContacts(view: ViewEntries): Contact[] {
   return view.entries.filter((entry) => entry.unid).map((entry) => {
     const fields: Record<string, string> = {};
