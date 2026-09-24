@@ -235,6 +235,36 @@ export function parseOutline(payload: string): FolderInfo[] {
   return [];
 }
 
+/** Domino l_JSVars lists items as {"@name":"From","text":{"0":"..."}}. */
+export function parseDominoItems(source: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const match of source.matchAll(/"@name"\s*:\s*"([^"]+)"/g)) {
+    const name = match[1];
+    if (!name || name in out) continue;
+    const window = source.slice(match.index ?? 0, (match.index ?? 0) + 600);
+    const text = window.match(/"0"\s*:\s*"((?:\\.|[^"\\])*)"/);
+    if (!text?.[1]) continue;
+    try {
+      out[name] = JSON.parse(`"${text[1]}"`) as string;
+    } catch {
+      out[name] = text[1];
+    }
+  }
+  return out;
+}
+
+export function internetAddress(value: string): string {
+  const angled = value.match(/<([^<>]+)>/);
+  const raw = (angled?.[1] ?? value).trim().replace(/^"+|"+$/g, "");
+  return raw.includes("@") ? raw : "";
+}
+
+export function replySubject(subject: string): string {
+  const trimmed = subject.trim();
+  if (/^re\s*:/i.test(trimmed)) return trimmed;
+  return trimmed ? `Re: ${trimmed}` : "Re:";
+}
+
 export function parseJsVars(source: string): Record<string, unknown> {
   let best: Record<string, unknown> | undefined;
   let bestScore = 0;

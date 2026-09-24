@@ -3,7 +3,11 @@ import type { InotesConfig } from "./config.js";
 import { toDatePart, toDominoDateTime, toDominoKey, toTimePart } from "./dates.js";
 import {
   extractNonce,
+  htmlToText,
+  internetAddress,
   interpretComposeResponse,
+  parseDominoItems,
+  replySubject,
   interpretEvent,
   interpretMessage,
   isLoginPage,
@@ -179,26 +183,56 @@ export class InotesClient {
 
   async replyMail(input: ReplyInput): Promise<ComposeResult> {
     const id = assertUnid(input.unid);
-    const folder = assertFolderName(input.folder ?? "($Inbox)");
+    assertFolderName(input.folder ?? "($Inbox)");
     requireText(input.body, "Текст ответа");
-    const action = input.replyAll ? "h_ReplyAll" : "h_Reply";
-    const url = this.command(`0/${id}/`, "EditDocument", {
+    const actionType = input.replyAll ? "h_ReplyToAll" : "h_ReplyTo";
+    const [itemsRes, bodyRes] = await Promise.all([
+      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "l_JSVars" })),
+      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "s_MailMemoReadBodyContent" })),
+    ]);
+    const items = parseDominoItems(itemsRes.text);
+    const parentFrom = internetAddress(items.ReplyTo || items.From || items.INetFrom || "");
+    const sendTo = input.to?.length ? input.to.join(", ") : parentFrom;
+    if (!sendTo) {
+      return { accepted: false, httpStatus: itemsRes.status, message: "Не удалось определить адрес для ответа." };
+    }
+    const subject = input.subject?.trim() || replySubject(items.Subject ?? "");
+    const quoted = bodyRes.status < 400 ? htmlToText(bodyRes.text) : "";
+    const body = quoted.trim()
+      ? `${normalizeNewlines(input.body)}\r\n\r\n${normalizeNewlines(quoted)}`
+      : normalizeNewlines(input.body);
+    const messageId = items.x_MessageID ?? "";
+    const references = [items.References, messageId].map((part) => part?.trim()).filter(Boolean).join(";");
+    const openUrl = this.command("($Drafts)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
-        ["h_EditAction", action],
-        ["s_NotesForm", "Reply"],
-        ["s_ViewName", folder],
+        ["h_EditAction", "h_New"],
+        ["s_NotesForm", "Memo"],
+        ["s_ViewName", "($Drafts)"],
+        ["s_MailActionType", actionType],
+        ["s_MailParentUNID", id],
       ]),
     });
-    const overrides: Record<string, string> = {
-      Body: normalizeNewlines(input.body),
-      s_NotesForm: "Reply",
-      s_ViewName: folder,
-    };
-    if (input.to?.length) overrides.SendTo = input.to.join(", ");
-    if (input.subject) overrides.Subject = input.subject;
-    return this.submitCompose(url, overrides, { prependBody: true });
+    return this.submitMemo(
+      openUrl,
+      {
+        to: sendTo,
+        cc: input.replyAll ? replyAllCopy(items, parentFrom) : "",
+        bcc: "",
+        subject,
+        body,
+      },
+      {
+        h_SetParentUnid: id,
+        s_MailParentUNID: id,
+        s_MailActionType: actionType,
+        In_Reply_To: messageId,
+        References: references,
+        s_SetReplyFlag: "1",
+        s_SetRFSaveInfo: id,
+      },
+    );
   }
 
   async forwardMail(input: ForwardInput): Promise<ComposeResult> {
@@ -385,6 +419,7 @@ export class InotesClient {
   private async submitMemo(
     openUrl: URL,
     values: { to: string; cc: string; bcc: string; subject: string; body: string },
+    extras: Record<string, string> = {},
   ): Promise<ComposeResult> {
     await this.ensureNonce();
     const browser = { userAgent: BROWSER_USER_AGENT };
@@ -414,6 +449,7 @@ export class InotesClient {
     fields.h_SetEditNextScene = "";
     fields.s_ViewName = "($Drafts)";
     fields.Form = fields.Form || "Memo";
+    for (const [key, value] of Object.entries(extras)) fields[key] = value;
     fields["%%Nonce"] = nonce;
     fields["%%PostCharset"] = "UTF-8";
     fields.h_SetReturnURL = "[[./&Form=l_CallListenerWithUnid]]";
@@ -607,6 +643,23 @@ function requireText(value: string, label: string): void {
 
 function normalizeNewlines(value: string): string {
   return value.replace(/\r?\n/g, "\r\n");
+}
+
+function replyAllCopy(items: Record<string, string>, parentFrom: string): string {
+  const seen = new Set<string>();
+  const own = parentFrom.toLowerCase();
+  const addresses: string[] = [];
+  for (const raw of [items.SendTo, items.CopyTo]) {
+    if (!raw) continue;
+    for (const part of raw.split(/[;,]/)) {
+      const address = internetAddress(part) || (part.includes("@") ? part.trim() : "");
+      const key = address.toLowerCase();
+      if (!address || key === own || seen.has(key)) continue;
+      seen.add(key);
+      addresses.push(address);
+    }
+  }
+  return addresses.join(", ");
 }
 
 function contactHaystack(contact: Contact): string {

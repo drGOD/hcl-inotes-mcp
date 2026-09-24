@@ -92,6 +92,51 @@ test("send_mail does not treat a generic 200 page as acceptance", async () => {
   }
 });
 
+test("reply_mail posts the parent reply on the shimmer send path", async () => {
+  const calls: Array<{ url: URL; method: string; body: string }> = [];
+  const original = globalThis.fetch;
+  const parent = "0123456789ABCDEF0123456789ABCDEF";
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method, body: typeof init?.body === "string" ? init.body : "" });
+    if (method === "POST") return new Response(read("send-accepted.html"), { status: 200 });
+    const query = url.search;
+    if (query.includes("Form=l_JSVars")) return new Response(read("reply-parent.js"), { status: 200 });
+    if (query.includes("Form=s_MailMemoReadBodyContent")) return new Response(read("reply-body.html"), { status: 200 });
+    return new Response(read("compose-form.html"), { status: 200 });
+  };
+  try {
+    const result = await new InotesClient(config).replyMail({
+      unid: parent,
+      body: "Ответ из MCP получен, ветка на месте.",
+    });
+    assert.equal(result.accepted, true);
+    const opened = calls.find((call) => call.method === "GET" && call.url.search.includes("h_PageUI"));
+    assert.match(opened?.url.search ?? "", /s_MailActionType;h_ReplyTo/);
+    assert.match(opened?.url.search ?? "", new RegExp(`s_MailParentUNID;${parent}`));
+    const posted = calls.find((call) => call.method === "POST");
+    assert.match(decodeURIComponent(posted?.url.pathname ?? ""), /\/\(\$Drafts\)\/\$new\/$/);
+    assert.match(posted?.url.search ?? "", /h_EditAction;h_ShimmerEdit/);
+    assert.match(posted?.url.search ?? "", /s_NotesForm;Memo/);
+    const fields = new URLSearchParams(posted?.body ?? "");
+    assert.equal(fields.get("SendTo"), "a@example.com");
+    assert.equal(fields.get("CopyTo"), "");
+    assert.equal(fields.get("Subject"), "Re: Проверка");
+    assert.match(fields.get("Body") ?? "", /^Ответ из MCP получен, ветка на месте\./);
+    assert.match(fields.get("Body") ?? "", /Исходный текст письма/);
+    assert.equal(fields.get("h_SetCommand"), "h_ShimmerSendMail");
+    assert.equal(fields.get("h_SetParentUnid"), parent);
+    assert.equal(fields.get("s_MailParentUNID"), parent);
+    assert.equal(fields.get("s_MailActionType"), "h_ReplyTo");
+    assert.equal(fields.get("In_Reply_To"), "<memo@example.com>");
+    assert.equal(fields.get("%%Nonce"), "abc123nonce");
+    assert.equal(fields.get("h_SetReturnURL"), "[[./&Form=l_CallListenerWithUnid]]");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("send_mail does not post when iNotes returns an empty shell", async () => {
   const original = globalThis.fetch;
   let posts = 0;

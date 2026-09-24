@@ -80,7 +80,7 @@ npm start
 
 `list_messages` возвращает UNID, признак непрочитанного, отправителя, тему, дату и размер. Смещение `start` начинается с 1, как у `ReadViewEntries`.
 
-Новое письмо повторяет отправку формы iNotes: открывается `($Drafts)/$new` с `h_PageUI`, в POST уходят поля формы, `h_SetCommand=h_ShimmerSendMail`, `SendTo`, тема, текст и `%%Nonce`. Успех — это ответ сервера с `DhU.onDatasetComplete`, а не просто страница без текста ошибки. Это не квитанция о доставке.
+Новое письмо и ответ повторяют отправку формы iNotes. Письмо открывает `($Drafts)/$new`. Ответ открывает тот же черновик с `s_MailActionType=h_ReplyTo` и UNID исходного письма, подставляет адрес отправителя и постит `h_ShimmerSendMail` вместе с `h_SetParentUnid` и `%%Nonce`. Успех — ответ сервера с `DhU.onDatasetComplete`. Страница «Form processed» и любой другой HTTP 200 без этого вызова не считаются отправкой. Это не квитанция о доставке.
 
 Календарь запрашивается так, как описано для iNotes: `Form=s_ReadViewEntries`, `FolderName;($Calendar)`, `KeyType=time`, `StartKey` / `UntilKey`. Создание события пишет тип `0` (событие), `3` (встреча) или `2` (весь день).
 

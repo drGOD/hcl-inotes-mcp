@@ -7,7 +7,10 @@ import { CookieJar } from "../src/cookies.js";
 import { loadConfig } from "../src/config.js";
 import { fromDominoDateTime, toDominoDateTime, toDominoKey } from "../src/dates.js";
 import {
+  internetAddress,
   interpretComposeResponse,
+  parseDominoItems,
+  replySubject,
   interpretMessage,
   isLoginPage,
   parseJsVars,
@@ -173,11 +176,21 @@ test("config requires the host and does not invent one", () => {
   assert.equal(config.mailPath, "/mail/user.nsf");
 });
 
+test("reads reply fields from Domino @name items", () => {
+  const items = parseDominoItems(read("reply-parent.js"));
+  assert.equal(internetAddress(items.From ?? ""), "a@example.com");
+  assert.equal(replySubject(items.Subject ?? ""), "Re: Проверка");
+  assert.equal(replySubject("Re: Проверка"), "Re: Проверка");
+  assert.equal(items.x_MessageID, "<memo@example.com>");
+});
+
 test("accepts a compose only when iNotes returns the send callback", () => {
   const rejected = interpretComposeResponse(200, "<html><title>Error</title><body>Unknown Command Exception</body></html>");
   assert.equal(rejected.accepted, false);
   const generic = interpretComposeResponse(200, "<html><title>Mail</title><body>OK</body></html>");
   assert.equal(generic.accepted, false);
+  const processed = interpretComposeResponse(200, "<html><title>Form processed</title><body><h1>Form processed</h1></body></html>");
+  assert.equal(processed.accepted, false);
   const shell = interpretComposeResponse(
     200,
     "<html><body onload=\"if (window.AAA){if (AAA.DSq.reloading) AAA.DSq.parent.location.reload();}\"></body></html>",
