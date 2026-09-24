@@ -199,14 +199,21 @@ export function toEvents(view: ViewEntries): CalendarEvent[] {
     const extra = parseUserData(columnByName(entry, ["$UserData"]));
     const datetimes = entry.columns
       .filter((column) => column.type === "datetime")
-      .map((column) => fromDominoDateTime(column.value));
+      .map((column) => fromDominoDateTime(column.value))
+      .filter((value) => /^\d{4}-\d{2}-\d{2}T/.test(value));
+    const start =
+      columnDominoDate(entry, ["StartDateTime", "$144", "$134"]) ?? dominoDate(extra.StartDateTime) ?? datetimes[0];
+    const end =
+      columnDominoDate(entry, ["EndDateTime", "$145", "$146"]) ??
+      dominoDate(extra.EndDateTime) ??
+      datetimes.find((value) => value !== start);
     return {
       unid: entry.unid,
       noteId: entry.noteId,
       subject: columnByName(entry, ["$73", "Subject", "$147"]) ?? extra.Subject,
-      start: normalizeMaybeDate(columnByName(entry, ["StartDateTime", "$144"])) ?? normalizeMaybeDate(extra.StartDateTime) ?? datetimes[0],
-      end: normalizeMaybeDate(columnByName(entry, ["EndDateTime", "$145"])) ?? normalizeMaybeDate(extra.EndDateTime) ?? datetimes[1],
-      location: columnByName(entry, ["Location", "Room"]) ?? extra.Location,
+      start,
+      end,
+      location: placeName(columnByName(entry, ["Location", "Room"]) ?? extra.Location),
     };
   });
 }
@@ -530,6 +537,26 @@ function parseUserData(value: string | undefined): Record<string, string> {
 function normalizeMaybeDate(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return /^\d{8}T\d{6}/.test(value) ? fromDominoDateTime(value) : value;
+}
+
+function columnDominoDate(entry: ViewEntry, names: string[]): string | undefined {
+  for (const name of names) {
+    const column = entry.columns.find((item) => item.name?.toLowerCase() === name.toLowerCase());
+    const parsed = dominoDate(column?.value);
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+function dominoDate(value: string | undefined): string | undefined {
+  if (!value || !/^\d{8}T\d{6}/.test(value.trim())) return undefined;
+  return fromDominoDateTime(value);
+}
+
+function placeName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "-" || trimmed === "—") return undefined;
+  return trimmed;
 }
 
 function toSize(value: string | undefined): number | undefined {

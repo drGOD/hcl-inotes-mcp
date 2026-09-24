@@ -17,6 +17,7 @@ import {
   parseLoginForm,
   parseOutline,
   parseViewEntries,
+  toEvents,
   toMailList,
 } from "../src/parse.js";
 import { inotesCommandUrl, presetFields } from "../src/urls.js";
@@ -153,6 +154,31 @@ test("builds a ReadViewEntries URL with literal PresetFields separators", () => 
     url.href,
     "https://mail.example.com/mail/user.nsf/iNotes/Proxy/?OpenDocument&Form=s_ReadViewEntries&PresetFields=FolderName;($Inbox),UnreadCountInfo;1,SearchString;hello%2C%20world&Start=1&Count=25",
   );
+});
+
+test("reads a calendar end time when the display column is a dash", () => {
+  const events = toEvents({
+    recognized: true,
+    entries: [
+      {
+        unid: "0123456789ABCDEF0123456789ABCDEF",
+        unread: false,
+        columns: [
+          { column: 0, name: "$134", type: "datetime", value: "20260929T110000,00Z" },
+          { column: 2, name: "$144", type: "datetime", value: "20260929T110000,00Z" },
+          { column: 3, name: "$145", type: "text", value: "-" },
+          { column: 4, name: "$146", type: "datetime", value: "20260929T120000,00Z" },
+          { column: 5, name: "$147", type: "text", value: "Планёрка" },
+          { column: 6, name: "Room", type: "text", value: "-" },
+        ],
+      },
+    ],
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.subject, "Планёрка");
+  assert.equal(events[0]?.start, "2026-09-29T11:00:00Z");
+  assert.equal(events[0]?.end, "2026-09-29T12:00:00Z");
+  assert.equal(events[0]?.location, undefined);
 });
 
 test("converts Domino calendar datetimes", () => {

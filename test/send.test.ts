@@ -210,3 +210,34 @@ test("send_mail does not post when iNotes returns an empty shell", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("read_event reloads the iNotes shell and reads appointment times", async () => {
+  const calls: string[] = [];
+  const original = globalThis.fetch;
+  const unid = "0123456789ABCDEF0123456789ABCDEF";
+  const shell = "<html><body><script>location.reload();</script></body></html>";
+  const document = [
+    '{"@name":"Subject","text":{"0":"Планёрка"}}',
+    '{"@name":"STARTDATETIME","text":{"0":"20260929T110000,00Z"}}',
+    '{"@name":"ENDDATETIME","text":{"0":"20260929T120000,00Z"}}',
+    '{"@name":"STRoomName","text":{"0":"-"}}',
+    '{"@name":"AppointmentType","text":{"0":"0"}}',
+  ].join(",");
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    calls.push(url.search);
+    if (calls.length === 1) return new Response(shell, { status: 200 });
+    return new Response(`[${document}]`, { status: 200 });
+  };
+  try {
+    const event = await new InotesClient(config).readEvent(unid);
+    assert.equal(calls.length, 2);
+    assert.equal(event.subject, "Планёрка");
+    assert.equal(event.start, "2026-09-29T11:00:00Z");
+    assert.equal(event.end, "2026-09-29T12:00:00Z");
+    assert.equal(event.location, undefined);
+    assert.equal(event.body, undefined);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

@@ -1,6 +1,6 @@
 import { CookieJar } from "./cookies.js";
 import type { InotesConfig } from "./config.js";
-import { toDatePart, toDominoDateTime, toDominoKey, toTimePart } from "./dates.js";
+import { fromDominoDateTime, toDatePart, toDominoDateTime, toDominoKey, toTimePart } from "./dates.js";
 import {
   extractNonce,
   htmlToText,
@@ -322,8 +322,10 @@ export class InotesClient {
     const id = assertUnid(unid);
     const params: Record<string, string> = { Form: "l_JSVars" };
     if (instanceStart) params.PresetFields = presetFields([["ThisStartDate", toDominoKey(instanceStart)]]);
-    const response = await this.authed("GET", this.command(`0/${id}/`, "OpenDocument", params));
-    return interpretEvent({ unid: id, fields: parseJsVars(response.text), bodyHtml: response.text });
+    const url = this.command(`0/${id}/`, "OpenDocument", params);
+    let response = await this.authed("GET", url);
+    if (isReloadShell(response.text)) response = await this.authed("GET", url);
+    return interpretEvent({ unid: id, fields: eventFields(response.text) });
   }
 
   async createEvent(input: CreateEventInput): Promise<ComposeResult> {
@@ -645,6 +647,43 @@ function bounded(value: number | undefined, fallback: number, min: number, max: 
 
 function requireText(value: string, label: string): void {
   if (!value.trim()) throw new InotesError(`${label} не может быть пустым.`);
+}
+
+function isReloadShell(html: string): boolean {
+  return html.length < 1500 && /location\.reload\s*\(/.test(html) && !/"@name"/.test(html);
+}
+
+function eventFields(source: string): Record<string, unknown> {
+  const items = parseDominoItems(source);
+  const fields: Record<string, unknown> = { ...parseJsVars(source) };
+  const assign = (key: string, value: string | undefined) => {
+    if (!value?.trim()) return;
+    fields[key] = value;
+  };
+  assign("Subject", items.Subject);
+  assign("StartDateTime", firstDominoDate(items.StartDateTime, items.STARTDATETIME, items.StartDate));
+  assign("EndDateTime", firstDominoDate(items.EndDateTime, items.ENDDATETIME, items.EndDate));
+  assign("AppointmentType", items.AppointmentType);
+  assign("Form", items.Form);
+  assign("Location", firstPlace(items.Location, items.Room, items.STRoomName));
+  assign("Body", items.Body);
+  return fields;
+}
+
+function firstDominoDate(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    if (value && /^\d{8}T\d{6}/.test(value.trim())) return fromDominoDateTime(value);
+  }
+  return undefined;
+}
+
+function firstPlace(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed === "-" || trimmed === "—") continue;
+    return trimmed;
+  }
+  return undefined;
 }
 
 function normalizeNewlines(value: string): string {
