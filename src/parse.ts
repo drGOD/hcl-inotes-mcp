@@ -313,7 +313,8 @@ export function interpretMessage(input: { unid?: string; fields?: Record<string,
 
 export function interpretEvent(input: { unid?: string; fields?: Record<string, unknown>; bodyHtml?: string }): EventDetails {
   const fields = input.fields ?? {};
-  const onlineMeetingUrl = httpUrl(fieldString(fields, "STUnyteConferenceURL"));
+  const onlineMeetingUrl =
+    httpUrl(fieldString(fields, "STUnyteConferenceURL")) ?? httpUrl(fieldString(fields, "Location"));
   return {
     ...interpretMessage(input),
     location: fieldString(fields, "Location") ?? fieldString(fields, "Room"),

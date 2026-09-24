@@ -264,22 +264,29 @@ test("create_event saves an appointment with the conference URL and does not inv
     assert.equal(result.accepted, true);
     const posted = calls.find((call) => call.method === "POST");
     assert.match(decodeURIComponent(posted?.url.pathname ?? ""), /\/\(\$Calendar\)\/\$new\/$/);
-    assert.match(posted?.url.search ?? "", /h_EditAction;h_ShimmerEdit/);
+    assert.match(posted?.url.search ?? "", /h_EditAction;h_New/);
+    assert.doesNotMatch(posted?.url.search ?? "", /h_ShimmerEdit/);
     assert.match(posted?.url.search ?? "", /s_NotesForm;Appointment/);
     const fields = new URLSearchParams(posted?.body ?? "");
     assert.equal(fields.get("Subject"), "Проверка ВКС");
-    assert.equal(fields.get("StartDate"), "20260925T070000,00Z");
-    assert.equal(fields.get("EndDate"), "20260925T080000,00Z");
-    assert.equal(fields.get("STUnyteConferenceURL"), "https://test.com/test");
-    assert.equal(fields.get("s_NewSTUnyteConferenceURL"), "https://test.com/test");
-    assert.equal(fields.get("OnlineMeeting"), "1");
+    assert.equal(fields.get("StartDate"), "20260925T100000$Z=-3$DO=0$ZN=Arab/E. Africa/Russian");
+    assert.equal(fields.get("EndDate"), "20260925T110000$Z=-3$DO=0$ZN=Arab/E. Africa/Russian");
+    assert.equal(fields.get("Location"), "https://test.com/test");
+    assert.equal(fields.get("STUnyteConferenceURL"), "");
+    assert.equal(fields.get("AppointmentType"), "3");
+    assert.equal(fields.get("%%Nonce"), "abc123nonce");
     assert.equal(fields.get("h_SetCommand"), "h_ShimmerSave");
-    assert.equal(fields.get("MailOptions"), "0");
+    assert.equal(fields.get("h_SetReturnURL"), "[[./&Form=l_CallListener]]");
+    assert.equal(fields.get("MailOptions"), "1");
     assert.equal(fields.get("s_SendNotice"), "0");
     assert.equal(fields.get("RequiredAttendees"), "");
     assert.equal(fields.get("EnterSendTo"), "");
-    assert.equal(fields.get("$AlarmSendTo"), "");
     assert.equal(fields.get("Alarms"), "0");
+    assert.equal(fields.get("h_SetParentUnid"), null);
+    assert.equal(fields.get("tmpTargetUNID"), null);
+    assert.equal(fields.get("tmpTargetAPPTUNID"), null);
+    assert.equal(fields.get("ApptUNIDURL"), null);
+    assert.equal(fields.get("s_NewApptUNIDURL"), null);
   } finally {
     globalThis.fetch = original;
   }

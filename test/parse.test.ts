@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CookieJar } from "../src/cookies.js";
 import { loadConfig } from "../src/config.js";
-import { fromDominoDateTime, toDominoDateTime, toDominoKey } from "../src/dates.js";
+import { fromDominoDateTime, inotesAppointmentClock, toDominoDateTime, toDominoKey } from "../src/dates.js";
 import {
   internetAddress,
   interpretComposeResponse,
@@ -193,12 +193,22 @@ test("reads the online meeting URL and ignores a field that is not a URL", () =>
   assert.equal(event.onlineMeetingUrl, "https://meet.example.com/room");
   const plain = interpretEvent({ fields: { STUnyteConferenceURL: "1", OnlineMeeting: "1" } });
   assert.equal(plain.onlineMeetingUrl, undefined);
+  const located = interpretEvent({ fields: { Location: "https://test.com/test" } });
+  assert.equal(located.onlineMeetingUrl, "https://test.com/test");
+  assert.equal(located.location, "https://test.com/test");
 });
 
 test("converts Domino calendar datetimes", () => {
   assert.equal(toDominoKey("2026-09-24T06:00:00Z"), "20260924T060000Z");
   assert.equal(toDominoDateTime("2026-09-24T06:00:00Z"), "20260924T060000,00Z");
   assert.equal(fromDominoDateTime("20260924T060000,00+03"), "2026-09-24T06:00:00+03:00");
+  const clock = inotesAppointmentClock("2026-09-25T10:00:00+03:00", "2026-09-25T11:00:00+03:00");
+  assert.equal(clock.start, "20260925T100000$Z=-3$DO=0$ZN=Arab/E. Africa/Russian");
+  assert.equal(clock.end, "20260925T110000$Z=-3$DO=0$ZN=Arab/E. Africa/Russian");
+  assert.equal(clock.intDate, "Пт 09.25.2026");
+  assert.equal(clock.intTime, "10:00");
+  assert.equal(clock.intEndTime, "11:00");
+  assert.equal(clock.intDur, "1h 00m");
 });
 
 test("config requires the host and does not invent one", () => {

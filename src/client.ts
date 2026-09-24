@@ -1,6 +1,6 @@
 import { CookieJar } from "./cookies.js";
 import type { InotesConfig } from "./config.js";
-import { fromDominoDateTime, toDominoDateTime, toDominoKey } from "./dates.js";
+import { fromDominoDateTime, inotesAppointmentClock, toDominoKey } from "./dates.js";
 import {
   extractNonce,
   htmlToText,
@@ -69,11 +69,22 @@ export type CreateEventInput = {
 
 type HttpResult = { status: number; url: string; text: string };
 
-type HttpOptions = { userAgent?: string };
+type HttpOptions = { userAgent?: string; referer?: string; browserForm?: boolean };
 
 /** iNotes returns the memo form only to a browser user agent. A custom agent gets an empty Haiku shell. */
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+const DWA_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
+const DWA_ACCEPT =
+  "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+const OMITTED_APPOINTMENT_IDS = [
+  "s_NewApptUNIDURL",
+  "h_SetParentUnid",
+  "tmpTargetUNID",
+  "tmpTargetAPPTUNID",
+  "ApptUNIDURL",
+] as const;
 
 export class InotesError extends Error {
   constructor(message: string) {
@@ -339,15 +350,13 @@ export class InotesClient {
     if (onlineMeetingUrl && !/^https?:\/\//i.test(onlineMeetingUrl)) {
       throw new InotesError("Ссылка сетевого собрания должна начинаться с http:// или https://.");
     }
-    const appointmentType = input.allDay ? "2" : input.kind === "meeting" ? "3" : "0";
+    const appointmentType = input.allDay ? "2" : onlineMeetingUrl || input.kind === "meeting" ? "3" : "0";
     const openUrl = this.command("($Calendar)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
         ["h_EditAction", "h_New"],
         ["s_NotesForm", "Appointment"],
-        ["s_ViewName", "($Calendar)"],
-        ["AppointmentType", appointmentType],
       ]),
     });
     return this.submitAppointment(openUrl, {
@@ -355,8 +364,8 @@ export class InotesClient {
       body: input.body ?? "",
       location: input.location ?? "",
       appointmentType,
-      start: toDominoDateTime(input.start),
-      end: toDominoDateTime(input.end),
+      start: input.start,
+      end: input.end,
       onlineMeetingUrl,
     });
   }
@@ -482,45 +491,47 @@ export class InotesClient {
     },
   ): Promise<ComposeResult> {
     await this.ensureNonce();
-    const browser = { userAgent: BROWSER_USER_AGENT };
+    const browser = { userAgent: DWA_USER_AGENT };
     const page = await this.authed("GET", openUrl, undefined, browser);
-    const nonce = extractNonce(page.text) ?? this.pageNonce ?? this.jar.nonce();
+    const nonce = extractNonce(page.text) || this.pageNonce || this.jar.nonce();
     const form = parseComposeForm(page.text);
-    if (!form || !("Subject" in form.fields) || !("StartDate" in form.fields) || !("STUnyteConferenceURL" in form.fields)) {
-      return { accepted: false, httpStatus: page.status, message: "iNotes не отдал форму события (нет Subject, StartDate или STUnyteConferenceURL)." };
+    if (!form || !("Subject" in form.fields) || !("StartDate" in form.fields)) {
+      return { accepted: false, httpStatus: page.status, message: "iNotes не отдал форму события (нет Subject или StartDate)." };
     }
     if (!nonce) {
       return { accepted: false, httpStatus: page.status, message: "iNotes не выдал %%Nonce для сохранения события." };
     }
     const fields: Record<string, string> = { ...form.fields };
     const set = (key: string, value: string) => {
-      fields[key] = value;
+      if (key in fields) fields[key] = value;
     };
+    const clock = inotesAppointmentClock(values.start, values.end, fields.StartTimeZone || fields.LocalTimeZone || "");
+    const place = values.onlineMeetingUrl || values.location;
     set("Subject", values.subject);
-    set("s_NewSubject", values.subject);
     set("h_Name", values.subject);
-    set("Body", values.body);
-    set("Location", values.location);
-    set("s_NewLocation", values.location);
-    set("AppointmentType", values.appointmentType);
-    set("StartDate", values.start);
-    set("EndDate", values.end);
-    set("NewStartDate", values.start);
-    set("NewEndDate", values.end);
-    set("ThisStartDate", values.start);
-    set("ThisEndDate", values.end);
-    set("h_EditAction", "h_Next");
-    set("h_SetCommand", "h_ShimmerSave");
-    set("MailOptions", "0");
-    set("SaveOptions", "1");
-    set("h_SetSaveDoc", "1");
-    set("h_SetPublishAction", "h_Publish");
-    set("h_SetPublishToFolder", "");
-    set("h_SetEditNextScene", "");
-    set("s_ViewName", "($Calendar)");
-    set("Form", fields.Form || "Appointment");
+    set("$AlarmDescription", values.subject);
+    if (values.body) set("Body", values.body);
+    set("Location", place);
+    fields.AppointmentType = values.appointmentType;
+    set("StartDate", clock.start);
+    set("EndDate", clock.end);
+    set("ThisStartDate", clock.start);
+    set("ThisEndDate", clock.end);
+    set("ThisInstDate", clock.start);
+    set("s_InstDate", clock.start);
+    set("StartTimeZone", clock.zone);
+    set("EndTimeZone", clock.zone);
+    set("LocalTimeZone", clock.zone);
+    set("IntDate", clock.intDate);
+    set("IntEndDate", clock.intEndDate);
+    set("IntTime", clock.intTime);
+    set("IntEndTime", clock.intEndTime);
+    set("IntDur", clock.intDur);
+    if (clock.zoneLabel) {
+      set("IntZoneAreaCtl", clock.zoneLabel);
+      set("IntEndZoneAreaCtl", clock.zoneLabel);
+    }
     set("s_SendNotice", "0");
-    set("h_MeetingCommand", "");
     for (const key of [
       "RequiredAttendees",
       "OptionalAttendees",
@@ -537,36 +548,41 @@ export class InotesClient {
       "Resources",
       "RequiredResources",
     ]) {
-      if (key in fields) fields[key] = "";
+      set(key, "");
     }
-    set("Alarms", "0");
-    set("$Alarm", "0");
-    set("$AlarmSendTo", "");
-    set("h_AlarmOn", "");
-    if (values.onlineMeetingUrl) {
-      set("OnlineMeeting", "1");
-      set("s_NewOnlineMeeting", "1");
-      set("SametimeType", "9");
-      set("s_NewSametimeType", "9");
-      set("STUnyteConferenceURL", values.onlineMeetingUrl);
-      set("s_NewSTUnyteConferenceURL", values.onlineMeetingUrl);
-    }
-    set("%%Nonce", nonce);
-    set("%%PostCharset", "UTF-8");
-    set("h_SetReturnURL", "[[./&Form=l_CallListenerWithUnid]]");
+    if (!fields.h_SetCommand) fields.h_SetCommand = "h_ShimmerSave";
+    if (!fields.h_SetSaveDoc) fields.h_SetSaveDoc = "1";
+    if (!fields.h_SetReturnURL) fields.h_SetReturnURL = "[[./&Form=l_CallListener]]";
+    if (!fields.h_EditAction || fields.h_EditAction === "h_New") fields.h_EditAction = "h_Next";
+    if (!fields.h_SetPublishAction) fields.h_SetPublishAction = "h_Publish";
+    if (!fields["%%PostCharset"]) fields["%%PostCharset"] = "UTF-8";
+    fields["%%Nonce"] = nonce;
+    for (const key of OMITTED_APPOINTMENT_IDS) delete fields[key];
     const postUrl = this.command("($Calendar)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
-        ["h_EditAction", "h_ShimmerEdit"],
-        ["s_ViewName", "($Calendar)"],
-        ["s_NotesForm", fields.Form],
+        ["h_EditAction", "h_New"],
+        ["s_NotesForm", "Appointment"],
       ]),
     });
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(fields)) params.set(key, value);
-    const posted = await this.authed("POST", postUrl, params, browser);
+    const posted = await this.authed("POST", postUrl, params, {
+      ...browser,
+      browserForm: true,
+      referer: this.mailFrameReferer(),
+    });
     return interpretComposeResponse(posted.status, posted.text);
+  }
+
+  private mailFrameReferer(): string {
+    const url = new URL(this.config.baseUrl);
+    const prefix = this.config.mailPath.replace(/\/+$/, "");
+    url.pathname = `${prefix}/iNotes/Mail/`;
+    url.search =
+      "?OpenDocument&ui=dwa_frame&l=ru&gz&CR&MX&TSF=20240716T090629,88Z&TS=20260920T220506,43Z&charset=UTF-8&charset=UTF-8&KIC&ua=safari&pt&gn";
+    return url.href;
   }
 
   private async submitCompose(
@@ -675,13 +691,28 @@ export class InotesClient {
     for (let hop = 0; hop < 5; hop += 1) {
       this.assertSameOrigin(current);
       const headers = new Headers();
-      headers.set("Accept", "text/html,application/json,application/xml;q=0.9,*/*;q=0.8");
+      headers.set("Accept", options?.browserForm ? DWA_ACCEPT : "text/html,application/json,application/xml;q=0.9,*/*;q=0.8");
       headers.set("User-Agent", options?.userAgent ?? "inotes-mcp/1.0");
+      if (options?.browserForm) {
+        headers.set("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7");
+        headers.set("Cache-Control", "no-cache");
+        headers.set("Pragma", "no-cache");
+        headers.set("Origin", new URL(this.config.baseUrl).origin);
+        if (options.referer) headers.set("Referer", options.referer);
+        headers.set("Sec-Fetch-Dest", "iframe");
+        headers.set("Sec-Fetch-Mode", "navigate");
+        headers.set("Sec-Fetch-Site", "same-origin");
+        headers.set("Sec-Fetch-User", "?1");
+        headers.set("Upgrade-Insecure-Requests", "1");
+        headers.set("sec-ch-ua", '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"');
+        headers.set("sec-ch-ua-mobile", "?0");
+        headers.set("sec-ch-ua-platform", '"macOS"');
+      }
       const cookie = this.jar.header();
       if (cookie) headers.set("Cookie", cookie);
       let reqBody: string | undefined;
       if (verb === "POST" && payload) {
-        headers.set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        headers.set("Content-Type", options?.browserForm ? "application/x-www-form-urlencoded" : "application/x-www-form-urlencoded; charset=UTF-8");
         reqBody = payload.toString();
       }
       const response = await fetch(current, {
