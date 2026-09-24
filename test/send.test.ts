@@ -55,6 +55,8 @@ test("send_mail posts the iNotes memo form and requires the accept callback", as
     assert.equal(fields.get("CopyTo"), "");
     assert.equal(fields.get("Subject"), "Тест отправки");
     assert.equal(fields.get("Body"), "Короткий текст.");
+    assert.equal(fields.get("s_UsePlainText"), "0");
+    assert.equal(fields.get("s_PlainEditor"), "0");
     assert.equal(fields.get("h_SetCommand"), "h_ShimmerSendMail");
     assert.equal(fields.get("h_EditAction"), "h_Next");
     assert.equal(fields.get("h_SetSaveDoc"), "1");
@@ -123,8 +125,10 @@ test("reply_mail posts the parent reply on the shimmer send path", async () => {
     assert.equal(fields.get("SendTo"), "a@example.com");
     assert.equal(fields.get("CopyTo"), "");
     assert.equal(fields.get("Subject"), "Re: Проверка");
-    assert.match(fields.get("Body") ?? "", /^Ответ из MCP получен, ветка на месте\./);
-    assert.match(fields.get("Body") ?? "", /Исходный текст письма/);
+    assert.equal(
+      fields.get("Body"),
+      "Ответ из MCP получен, ветка на месте.<br><br>Исходный текст письма.",
+    );
     assert.equal(fields.get("h_SetCommand"), "h_ShimmerSendMail");
     assert.equal(fields.get("h_SetParentUnid"), parent);
     assert.equal(fields.get("s_MailParentUNID"), parent);
@@ -136,6 +140,55 @@ test("reply_mail posts the parent reply on the shimmer send path", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("send_mail keeps paragraph breaks in the rich-text Body field", async () => {
+  const calls: Array<{ method: string; body: string }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, body: typeof init?.body === "string" ? init.body : "" });
+    if (method === "POST") return new Response(read("send-accepted.html"), { status: 200 });
+    return new Response(read("compose-form.html"), { status: 200 });
+  };
+  const body = "Строка один.\nСтрока два.\n\nПосле пустой строки третий абзац.\nИ ещё одна строка.";
+  try {
+    const result = await new InotesClient(config).sendMail({
+      to: ["a@example.com"],
+      subject: "Переносы",
+      body,
+    });
+    assert.equal(result.accepted, true);
+    const posted = calls.find((call) => call.method === "POST");
+    const fields = new URLSearchParams(posted?.body ?? "");
+    const stored = fields.get("Body") ?? "";
+    assert.equal(
+      stored,
+      "Строка один.<br>Строка два.<br><br>После пустой строки третий абзац.<br>И ещё одна строка.",
+    );
+    assert.equal(stored.includes("\n") || stored.includes("\r"), false);
+    assert.equal(fields.get("s_UsePlainText"), "0");
+    assert.equal(fields.get("s_UsePlainTextAndHTML"), "0");
+    assert.equal(fields.get("s_PlainEditor"), "0");
+    const crlf = await postedBody(calls, "Строка один.\r\nСтрока два.\r\n\r\nПосле пустой строки третий абзац.\r\nИ ещё одна строка.");
+    assert.equal(crlf, stored);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+async function postedBody(
+  calls: Array<{ method: string; body: string }>,
+  body: string,
+): Promise<string> {
+  calls.length = 0;
+  await new InotesClient(config).sendMail({
+    to: ["a@example.com"],
+    subject: "Переносы",
+    body,
+  });
+  const posted = calls.find((call) => call.method === "POST");
+  return new URLSearchParams(posted?.body ?? "").get("Body") ?? "";
+}
 
 test("send_mail does not post when iNotes returns an empty shell", async () => {
   const original = globalThis.fetch;

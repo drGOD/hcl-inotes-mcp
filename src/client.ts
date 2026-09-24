@@ -437,7 +437,7 @@ export class InotesClient {
     fields.CopyTo = values.cc;
     fields.BlindCopyTo = values.bcc;
     fields.Subject = values.subject;
-    fields.Body = values.body;
+    fields.Body = encodeMemoHtml(values.body);
     fields.h_Name = values.subject;
     fields.h_EditAction = "h_Next";
     fields.h_SetCommand = "h_ShimmerSendMail";
@@ -450,6 +450,12 @@ export class InotesClient {
     fields.s_ViewName = "($Drafts)";
     fields.Form = fields.Form || "Memo";
     for (const [key, value] of Object.entries(extras)) fields[key] = value;
+    // The memo form defaults to rich text (s_UsePlainText=0). A plain Body
+    // with CR/LF is stored as HTML, and the web UI collapses those breaks.
+    // The editor writes the same Body field as HTML, with <br> between lines.
+    fields.s_UsePlainText = "0";
+    fields.s_UsePlainTextAndHTML = "0";
+    fields.s_PlainEditor = "0";
     fields["%%Nonce"] = nonce;
     fields["%%PostCharset"] = "UTF-8";
     fields.h_SetReturnURL = "[[./&Form=l_CallListenerWithUnid]]";
@@ -643,6 +649,19 @@ function requireText(value: string, label: string): void {
 
 function normalizeNewlines(value: string): string {
   return value.replace(/\r?\n/g, "\r\n");
+}
+
+function encodeMemoHtml(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(escapeHtmlText)
+    .join("<br>");
+}
+
+function escapeHtmlText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function replyAllCopy(items: Record<string, string>, parentFrom: string): string {
