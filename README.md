@@ -71,7 +71,7 @@ npm start
 | `search_mail` | Поиск в папке (`SearchString` у `s_ReadViewEntries`) |
 | `send_mail` | Новое письмо, форма Memo / `h_PageUI` |
 | `reply_mail` | Ответ или ответ всем (`h_Reply`, `h_ReplyAll`) |
-| `forward_mail` | Пересылка (`h_Forward`) |
+| `forward_mail` | Пересылка (`h_Forward`) через `($Drafts)/$new` |
 | `list_contacts` | Личная адресная книга в почтовом файле: `($Contacts)`, затем `($People)` |
 | `search_contacts` | Поиск по этой адресной книге |
 | `list_events` | События `($Calendar)` за диапазон дат |
@@ -80,7 +80,7 @@ npm start
 
 `list_messages` возвращает UNID, признак непрочитанного, отправителя, тему, дату и размер. Смещение `start` начинается с 1, как у `ReadViewEntries`.
 
-Новое письмо и ответ повторяют отправку формы iNotes. Письмо открывает `($Drafts)/$new`. Ответ открывает тот же черновик с `s_MailActionType=h_ReplyTo` и UNID исходного письма, подставляет адрес отправителя и постит `h_ShimmerSendMail` вместе с `h_SetParentUnid` и `%%Nonce`. Успех — ответ сервера с `DhU.onDatasetComplete`. Страница «Form processed» и любой другой HTTP 200 без этого вызова не считаются отправкой. Это не квитанция о доставке.
+Новое письмо, ответ и пересылка повторяют отправку формы iNotes. Письмо открывает `($Drafts)/$new`. Ответ открывает тот же черновик с `s_MailActionType=h_ReplyTo` и UNID исходного письма. Пересылка открывает его с `s_MailActionType=h_Forward` и тем же UNID родителя. Оба поставят `h_ShimmerSendMail` вместе с `h_SetParentUnid`, `%%Nonce` и адресом возврата `l_CallListenerWithUnid`. Успех — ответ сервера с `DhU.onDatasetComplete`. Страница «Form processed» и любой другой HTTP 200 без этого вызова не считаются отправкой. Это не квитанция о доставке.
 
 Календарь запрашивается так, как описано для iNotes: `Form=s_ReadViewEntries`, `FolderName;($Calendar)`, `KeyType=time`, `StartKey` / `UntilKey`. Создание события пишет тип `0` (событие), `3` (встреча) или `2` (весь день).
 

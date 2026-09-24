@@ -7,6 +7,7 @@ import {
   internetAddress,
   interpretComposeResponse,
   parseDominoItems,
+  forwardSubject,
   replySubject,
   interpretEvent,
   interpretMessage,
@@ -249,26 +250,45 @@ export class InotesClient {
 
   async forwardMail(input: ForwardInput): Promise<ComposeResult> {
     const id = assertUnid(input.unid);
-    const folder = assertFolderName(input.folder ?? "($Inbox)");
+    assertFolderName(input.folder ?? "($Inbox)");
     if (input.to.length === 0) throw new InotesError("Укажите получателя пересылки.");
-    const url = this.command(`0/${id}/`, "EditDocument", {
+    const [itemsRes, bodyRes] = await Promise.all([
+      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "l_JSVars" })),
+      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "s_MailMemoReadBodyContent" })),
+    ]);
+    const items = parseDominoItems(itemsRes.text);
+    const quoted = bodyRes.status < 400 ? htmlToText(bodyRes.text) : "";
+    const note = normalizeNewlines(input.comment ?? "");
+    const body = quoted.trim()
+      ? note.trim()
+        ? `${note}\r\n\r\n${normalizeNewlines(quoted)}`
+        : normalizeNewlines(quoted)
+      : note;
+    const openUrl = this.command("($Drafts)/$new/", "EditDocument", {
       Form: "h_PageUI",
       ui: "dwa_form",
       PresetFields: presetFields([
-        ["h_EditAction", "h_Forward"],
+        ["h_EditAction", "h_New"],
         ["s_NotesForm", "Memo"],
-        ["s_ViewName", folder],
+        ["s_ViewName", "($Drafts)"],
+        ["s_MailActionType", "h_Forward"],
+        ["s_MailParentUNID", id],
       ]),
     });
-    return this.submitCompose(
-      url,
+    return this.submitMemo(
+      openUrl,
       {
-        SendTo: input.to.join(", "),
-        Body: normalizeNewlines(input.comment ?? ""),
-        s_NotesForm: "Memo",
-        s_ViewName: folder,
+        to: input.to.join(", "),
+        cc: "",
+        bcc: "",
+        subject: forwardSubject(items.Subject ?? ""),
+        body,
       },
-      { prependBody: true },
+      {
+        h_SetParentUnid: id,
+        s_MailParentUNID: id,
+        s_MailActionType: "h_Forward",
+      },
     );
   }
 
@@ -583,40 +603,6 @@ export class InotesClient {
     url.search =
       "?OpenDocument&ui=dwa_frame&l=ru&gz&CR&MX&TSF=20240716T090629,88Z&TS=20260920T220506,43Z&charset=UTF-8&charset=UTF-8&KIC&ua=safari&pt&gn";
     return url.href;
-  }
-
-  private async submitCompose(
-    url: URL,
-    overrides: Record<string, string>,
-    options: { prependBody?: boolean } = {},
-  ): Promise<ComposeResult> {
-    await this.ensureNonce();
-    const page = await this.authed("GET", url);
-    const nonce = extractNonce(page.text) ?? this.pageNonce ?? this.jar.nonce();
-    if (nonce) this.pageNonce = nonce;
-    const form = parseComposeForm(page.text);
-    const fields: Record<string, string> = { ...(form?.fields ?? {}) };
-    const previousBody = fields.Body ?? "";
-    for (const [key, value] of Object.entries(overrides)) fields[key] = value;
-    if (options.prependBody && previousBody.trim() && overrides.Body != null) {
-      fields.Body = `${overrides.Body}\r\n\r\n${previousBody}`;
-    }
-    const openAction = fields.h_EditAction;
-    if (!openAction || /^(h_New|h_ShimmerEdit|h_Reply|h_ReplyAll|h_Forward)$/i.test(openAction)) {
-      fields.h_EditAction = "h_Next";
-    }
-    if (nonce) fields["%%Nonce"] = nonce;
-    if (!fields["%%PostCharset"]) fields["%%PostCharset"] = "UTF-8";
-    const action = form?.action ? new URL(form.action, page.url) : url;
-    this.assertSameOrigin(action);
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(fields)) params.set(key, value);
-    const posted = await this.authed("POST", action, params);
-    const interpreted = interpretMessage({ bodyHtml: posted.text, fields: parseJsVars(posted.text) });
-    if (interpreted.encrypted && !interpreted.bodyAvailable && !form) {
-      return { accepted: false, httpStatus: posted.status, message: interpreted.hint ?? "Письмо зашифровано." };
-    }
-    return interpretComposeResponse(posted.status, posted.text);
   }
 
   private async ensureNonce(): Promise<void> {

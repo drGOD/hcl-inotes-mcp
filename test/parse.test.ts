@@ -10,6 +10,7 @@ import {
   internetAddress,
   interpretComposeResponse,
   parseDominoItems,
+  forwardSubject,
   replySubject,
   interpretEvent,
   interpretMessage,
@@ -231,6 +232,8 @@ test("reads reply fields from Domino @name items", () => {
   assert.equal(internetAddress(items.From ?? ""), "a@example.com");
   assert.equal(replySubject(items.Subject ?? ""), "Re: Проверка");
   assert.equal(replySubject("Re: Проверка"), "Re: Проверка");
+  assert.equal(forwardSubject(items.Subject ?? ""), "Fw: Проверка");
+  assert.equal(forwardSubject("Fw: Проверка"), "Fw: Проверка");
   assert.equal(items.x_MessageID, "<memo@example.com>");
 });
 

@@ -273,6 +273,12 @@ export function replySubject(subject: string): string {
   return trimmed ? `Re: ${trimmed}` : "Re:";
 }
 
+export function forwardSubject(subject: string): string {
+  const trimmed = subject.trim();
+  if (/^(fw|fwd)\s*:/i.test(trimmed)) return trimmed;
+  return trimmed ? `Fw: ${trimmed}` : "Fw:";
+}
+
 export function parseJsVars(source: string): Record<string, unknown> {
   let best: Record<string, unknown> | undefined;
   let bestScore = 0;
