@@ -1,0 +1,7 @@
+services:
+  inotes-mcp:
+    build: .
+    image: inotes-mcp
+    env_file: .env
+    stdin_open: true
+    tty: true

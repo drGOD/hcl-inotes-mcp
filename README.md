@@ -65,6 +65,38 @@ npm start
 
 Проверка типов: `npm run typecheck`. Тесты читают фикстуры и не ходят на почтовый сервер.
 
+## Docker
+
+Образ собирается в два этапа: зависимости и сборка, затем только runtime. Паролей и cookie в образе нет. Транспорт остаётся stdio, HTTP-порт не добавляется.
+
+Скопируйте пример и заполните переменные. `INOTES_DIRECTORY` должен быть именем каталога из окна iNotes «Выбрать адреса», поле «Искать в». Пример: `Example Directory`. Хост и почтовый файл — свои, в документации только заглушки `https://mail.example.com` и `/mail/MAILFILE.nsf`.
+
+```bash
+cp .env.example .env
+docker compose build
+```
+
+Клиент MCP запускает контейнер так и держит stdin открытым:
+
+```bash
+docker run -i --rm --env-file .env inotes-mcp
+```
+
+В Cursor:
+
+```json
+{
+  "mcpServers": {
+    "inotes": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--env-file", ".env", "inotes-mcp"]
+    }
+  }
+}
+```
+
+Запускайте клиент из каталога, где лежит заполненный `.env`. Файл `.env` в образ не копируется.
+
 ## Инструменты
 
 | Инструмент | Что делает |
