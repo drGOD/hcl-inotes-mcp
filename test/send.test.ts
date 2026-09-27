@@ -122,6 +122,10 @@ test("reply_mail posts the parent reply on the shimmer send path", async () => {
     assert.match(posted?.url.search ?? "", /h_EditAction;h_ShimmerEdit/);
     assert.match(posted?.url.search ?? "", /s_NotesForm;Memo/);
     const fields = new URLSearchParams(posted?.body ?? "");
+    const readRequests = calls.filter((call) => call.method === "GET" &&
+      ["l_JSVars", "s_MailMemoReadBodyContent"].includes(call.url.searchParams.get("Form") ?? ""));
+    assert.equal(readRequests.length, 2);
+    assert.ok(readRequests.every((call) => call.url.searchParams.get("PresetFields") === "s_NoMarkRead;1"));
     assert.equal(fields.get("SendTo"), "a@example.com");
     assert.equal(fields.get("CopyTo"), "");
     assert.equal(fields.get("Subject"), "Re: Проверка");
@@ -169,6 +173,10 @@ test("forward_mail posts the parent forward on the shimmer send path", async () 
     assert.match(decodeURIComponent(posted?.url.pathname ?? ""), /\/\(\$Drafts\)\/\$new\/$/);
     assert.match(posted?.url.search ?? "", /h_EditAction;h_ShimmerEdit/);
     const fields = new URLSearchParams(posted?.body ?? "");
+    const readRequests = calls.filter((call) => call.method === "GET" &&
+      ["l_JSVars", "s_MailMemoReadBodyContent"].includes(call.url.searchParams.get("Form") ?? ""));
+    assert.equal(readRequests.length, 2);
+    assert.ok(readRequests.every((call) => call.url.searchParams.get("PresetFields") === "s_NoMarkRead;1"));
     assert.equal(fields.get("SendTo"), "fwd@example.com");
     assert.equal(fields.get("CopyTo"), "");
     assert.equal(fields.get("Subject"), "Fw: Проверка");

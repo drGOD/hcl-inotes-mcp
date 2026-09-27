@@ -133,6 +133,39 @@ test("parses the folder outline and the Domino login form", () => {
   assert.equal(form?.fields["%%ModDate"], "0000000000000000");
 });
 
+test("parses Domino outline entries returned as an indexed object", () => {
+  const payload = `var result = {"outline":{"0":["1",0,"Входящие","/icons/inbox.gif","/mail/user.nsf/?OpenDocument&PresetFields=s_ViewName;($Inbox),x;1",1],"1":["2",1,"Архив","/icons/folder.gif","/mail/user.nsf/?OpenDocument&PresetFields=s_ViewName;ARCHIVE,x;1",0]}};`;
+  assert.deepEqual(parseOutline(payload).map((folder) => [folder.label, folder.viewName]), [
+    ["Входящие", "($Inbox)"],
+    ["Архив", "ARCHIVE"],
+  ]);
+});
+
+test("parses the executable JavaScript outline emitted by live Domino", () => {
+  const payload = `{"outline": (function(){var aavOutline=[];aavOutline[aavOutline.length]=new Array("5",0,'Входящие','/icons/inbox.gif','/mail/user.nsf/($Inbox)/?OpenView&PresetFields=s_ViewName;($Inbox),x;1',1);aavOutline[aavOutline.length]=new Array("6",1,'Проекты, архив','/icons/folder.gif','/mail/user.nsf/Projects/?OpenView&PresetFields=s_ViewName;ARCHIVE,x;1',0);return aavOutline;}())}`;
+  assert.deepEqual(parseOutline(payload).map((folder) => [folder.label, folder.viewName, folder.level, folder.dropTarget]), [
+    ["Входящие", "($Inbox)", 0, true],
+    ["Проекты, архив", "ARCHIVE", 1, false],
+  ]);
+});
+
+test("parses message fields in Domino l_JSVars item format", () => {
+  const payload = `{"items":[{"@name":"Subject","text":{"0":"Проверка"}},{"@name":"From","text":{"0":"Иван <ivan@example.com>"}},{"@name":"Body","text":{"0":"Текст письма"}},{"@name":"SendTo","text":{"0":"user@example.com"}}]}`;
+  const fields = parseJsVars(payload);
+  const message = interpretMessage({ fields });
+  assert.equal(message.subject, "Проверка");
+  assert.equal(message.from, "Иван <ivan@example.com>");
+  assert.equal(message.body, "Текст письма");
+  assert.deepEqual(message.to, ["user@example.com"]);
+});
+
+test("reads Domino message field names regardless of their casing", () => {
+  const message = interpretMessage({ fields: { SUBJECT: "Тема", FROM: "sender@example.com", POSTEDDATE: "20260927T052829Z" } });
+  assert.equal(message.subject, "Тема");
+  assert.equal(message.from, "sender@example.com");
+  assert.equal(message.date, "2026-09-27T05:28:29Z");
+});
+
 test("reads the iNotes nonce from ShimmerS and keeps session cookies", () => {
   const jar = new CookieJar();
   jar.loadHeader("Cookie: DomAuthSessId=session-value; ShimmerS=S:1&N:nonce-value&T:2");

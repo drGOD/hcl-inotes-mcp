@@ -163,15 +163,52 @@ export class InotesClient {
 
   async readMessage(unid: string): Promise<MessageContent> {
     const id = assertUnid(unid);
-    const [fieldsRes, bodyRes] = await Promise.all([
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "l_JSVars" })),
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "s_MailMemoReadBodyContent" })),
-    ]);
+    // s_NoMarkRead keeps the unread flag intact; Domino may return a reload shell once per document.
+    const fieldsRes = await this.readMessageForm(id, "l_JSVars");
+    const bodyRes = await this.readMessageForm(id, "s_MailMemoReadBodyContent");
     return interpretMessage({
       unid: id,
       fields: parseJsVars(fieldsRes.text),
       bodyHtml: bodyRes.status < 400 ? bodyRes.text : undefined,
     });
+  }
+
+  private async readMessageForm(unid: string, form: "l_JSVars" | "s_MailMemoReadBodyContent"): Promise<HttpResult> {
+    const url = this.command(`0/${unid}/`, "OpenDocument", {
+      Form: form,
+      PresetFields: "s_NoMarkRead;1",
+    });
+    const options = { browserForm: true, referer: this.mailFrameReferer() };
+    let response = await this.authed("GET", url, undefined, options);
+    if (isReloadShell(response.text)) response = await this.authed("GET", url, undefined, options);
+    return response;
+  }
+
+  async markMessageUnread(unid: string, folder = "($Inbox)"): Promise<{ unid: string; unread: true }> {
+    const id = assertUnid(unid);
+    const viewName = assertFolderName(folder);
+    await this.ensureNonce();
+    const nonce = this.pageNonce ?? this.jar.nonce();
+    const response = await this.authed(
+      "POST",
+      this.command("iNotes/Mail/", "EditDocument", { PresetFields: "s_NoMarkRead;1" }),
+      new URLSearchParams({
+        Form: "l_HaikuErrorStatusJSON",
+        ui: "dwa_form",
+        s_ViewName: viewName,
+        h_AllDocs: "",
+        h_SetCommand: "h_ShimmerMarkUnread",
+        h_SetReturnURL: "[[./&Form=s_CallBlankScript]]",
+        h_EditAction: "h_Next",
+        h_SetEditNextScene: "l_HaikuErrorStatusJSON",
+        h_SetDeleteList: id,
+        h_SetDeleteListCS: "",
+        ...(nonce ? { "%%Nonce": nonce } : {}),
+      }),
+      { browserForm: true, referer: this.mailFrameReferer() },
+    );
+    if (response.status >= 400) throw new InotesError(`Не удалось отметить письмо непрочитанным. HTTP ${response.status}`);
+    return { unid: id, unread: true };
   }
 
   async sendMail(input: SendMailInput): Promise<ComposeResult> {
@@ -201,10 +238,8 @@ export class InotesClient {
     assertFolderName(input.folder ?? "($Inbox)");
     requireText(input.body, "Текст ответа");
     const actionType = input.replyAll ? "h_ReplyToAll" : "h_ReplyTo";
-    const [itemsRes, bodyRes] = await Promise.all([
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "l_JSVars" })),
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "s_MailMemoReadBodyContent" })),
-    ]);
+    const itemsRes = await this.readMessageForm(id, "l_JSVars");
+    const bodyRes = await this.readMessageForm(id, "s_MailMemoReadBodyContent");
     const items = parseDominoItems(itemsRes.text);
     const parentFrom = internetAddress(items.ReplyTo || items.From || items.INetFrom || "");
     const sendTo = input.to?.length ? input.to.join(", ") : parentFrom;
@@ -254,10 +289,8 @@ export class InotesClient {
     const id = assertUnid(input.unid);
     assertFolderName(input.folder ?? "($Inbox)");
     if (input.to.length === 0) throw new InotesError("Укажите получателя пересылки.");
-    const [itemsRes, bodyRes] = await Promise.all([
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "l_JSVars" })),
-      this.authed("GET", this.command(`0/${id}/`, "OpenDocument", { Form: "s_MailMemoReadBodyContent" })),
-    ]);
+    const itemsRes = await this.readMessageForm(id, "l_JSVars");
+    const bodyRes = await this.readMessageForm(id, "s_MailMemoReadBodyContent");
     const items = parseDominoItems(itemsRes.text);
     const quoted = bodyRes.status < 400 ? htmlToText(bodyRes.text) : "";
     const note = normalizeNewlines(input.comment ?? "");

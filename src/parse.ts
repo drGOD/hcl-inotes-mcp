@@ -263,26 +263,109 @@ export function toEvents(view: ViewEntries): CalendarEvent[] {
 
 export function parseOutline(payload: string): FolderInfo[] {
   for (const value of extractObjects(payload)) {
-    const outline = value.outline;
-    if (!Array.isArray(outline)) continue;
+    const rawOutline = value.outline ?? value.Outline ?? value.items;
+    const outline = Array.isArray(rawOutline)
+      ? rawOutline
+      : rawOutline && typeof rawOutline === "object"
+        ? Object.keys(rawOutline as Record<string, unknown>).sort((a, b) => Number(a) - Number(b)).map((key) => (rawOutline as Record<string, unknown>)[key])
+        : [];
     const folders: FolderInfo[] = [];
     for (const row of outline) {
-      if (!Array.isArray(row) || row.length < 5) continue;
-      const label = String(row[2] ?? "").trim();
-      const url = String(row[4] ?? "");
+      const values = Array.isArray(row)
+        ? row
+        : row && typeof row === "object"
+          ? Object.values(row as Record<string, unknown>)
+          : [];
+      if (values.length < 5) continue;
+      const label = String(values[2] ?? "").trim();
+      const url = String(values[4] ?? "");
       const viewName = viewNameFromOutlineUrl(url);
       if (!label || !viewName) continue;
-      const level = Number(row[1]);
+      const level = Number(values[1]);
       folders.push({
         label,
         viewName,
         level: Number.isFinite(level) ? level : 0,
-        dropTarget: Number(row[5] ?? 0) > 0,
+        dropTarget: Number(values[5] ?? 0) > 0,
       });
     }
     if (folders.length > 0) return folders;
   }
-  return [];
+  return parseDominoOutlineArrays(payload);
+}
+
+/** iNotes can serialize its outline as executable JS instead of JSON. */
+function parseDominoOutlineArrays(source: string): FolderInfo[] {
+  const folders: FolderInfo[] = [];
+  const arrayStart = /new\s+Array\s*\(/gi;
+  for (const match of source.matchAll(arrayStart)) {
+    const open = (match.index ?? 0) + match[0].length - 1;
+    let quote = "";
+    let escaped = false;
+    let depth = 1;
+    let end = open + 1;
+    for (; end < source.length && depth > 0; end += 1) {
+      const ch = source[end] ?? "";
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = "";
+      } else if (ch === "'" || ch === '"') quote = ch;
+      else if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+    }
+    if (depth !== 0) continue;
+    const values = splitJsArguments(source.slice(open + 1, end - 1));
+    if (values.length < 5) continue;
+    const label = jsLiteral(values[2] ?? "").trim();
+    const url = jsLiteral(values[4] ?? "");
+    const viewName = viewNameFromOutlineUrl(url);
+    if (!label || !viewName) continue;
+    const level = Number(jsLiteral(values[1] ?? "0"));
+    folders.push({
+      label,
+      viewName,
+      level: Number.isFinite(level) ? level : 0,
+      dropTarget: Number(jsLiteral(values[5] ?? "0")) > 0,
+    });
+  }
+  return folders;
+}
+
+function splitJsArguments(source: string): string[] {
+  const values: string[] = [];
+  let quote = "";
+  let escaped = false;
+  let start = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i] ?? "";
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === quote) quote = "";
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === ",") {
+      values.push(source.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  values.push(source.slice(start).trim());
+  return values;
+}
+
+function jsLiteral(value: string): string {
+  const trimmed = value.trim();
+  if (/^"[\s\S]*"$/.test(trimmed)) {
+    try {
+      return JSON.parse(trimmed) as string;
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  if (/^'[\s\S]*'$/.test(trimmed)) {
+    return trimmed.slice(1, -1).replace(/\\(['\\])/g, "$1").replace(/\\n/g, "\n").replace(/\\r/g, "\r");
+  }
+  return trimmed;
 }
 
 /** Domino l_JSVars lists items as {"@name":"From","text":{"0":"..."}}. */
@@ -335,6 +418,8 @@ export function parseJsVars(source: string): Record<string, unknown> {
     }
   }
   if (best && bestScore > 0) return best;
+  const dominoItems = parseDominoItems(source);
+  if (Object.keys(dominoItems).length > 0) return dominoItems;
   return extractLoosePairs(source);
 }
 
@@ -350,7 +435,7 @@ export function interpretMessage(input: { unid?: string; fields?: Record<string,
     from: fieldString(fields, "From") ?? fieldString(fields, "INetFrom"),
     to: splitAddresses(fieldString(fields, "SendTo")),
     cc: splitAddresses(fieldString(fields, "CopyTo")),
-    date: fieldString(fields, "PostedDate") ?? fieldString(fields, "DeliveredDate"),
+    date: normalizeMaybeDate(fieldString(fields, "PostedDate") ?? fieldString(fields, "DeliveredDate")),
     encrypted,
     bodyAvailable: body.length > 0,
   };
@@ -755,7 +840,9 @@ function httpUrl(value: string | undefined): string | undefined {
 }
 
 function fieldString(fields: Record<string, unknown>, key: string): string | undefined {
-  const value = fields[key];
+  const actualKey = Object.keys(fields).find((candidate) => candidate === key) ??
+    Object.keys(fields).find((candidate) => candidate.toLowerCase() === key.toLowerCase());
+  const value = actualKey == null ? undefined : fields[actualKey];
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) {

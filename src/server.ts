@@ -43,11 +43,22 @@ export function createServer(client: InotesClient): McpServer {
     {
       title: "Прочитать письмо",
       description:
-        "Читает письмо по UNID. Если сервер сообщает, что оно зашифровано и не отдаёт текст, возвращает encrypted=true и подсказку разблокировать Notes ID в iNotes. Текст возвращается только когда его уже отдала веб-сессия.",
+        "Читает письмо по UNID, не меняя статус прочитанности. Если сервер сообщает о шифровании, вернёт encrypted=true и подсказку разблокировать Notes ID.",
       inputSchema: z.object({ unid }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) => run(() => client.readMessage(args.unid)),
+  );
+
+  server.registerTool(
+    "mark_message_unread",
+    {
+      title: "Отметить письмо непрочитанным",
+      description: "Помечает письмо как непрочитанное в указанной папке (по умолчанию входящие).",
+      inputSchema: z.object({ unid, folder: folder.optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async (args) => run(() => client.markMessageUnread(args.unid, args.folder)),
   );
 
   server.registerTool(

@@ -77,3 +77,101 @@ test("list and search sort by the view date column, not by size", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("read_message uses Domino browser form headers and parses its body response", async () => {
+  const calls: Array<{ url: URL; headers: Headers }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const headers = new Headers(init?.headers);
+    calls.push({ url, headers });
+    return url.searchParams.get("Form") === "s_MailMemoReadBodyContent"
+      ? new Response("<html><body><p>Текст живого письма.</p></body></html>", { status: 200 })
+      : new Response('{"Subject":"Тест","From":"sender@example.com"}', { status: 200 });
+  };
+  try {
+    const client = new InotesClient(
+      loadConfig({
+        INOTES_BASE_URL: "https://mail.example.com",
+        INOTES_MAIL_PATH: "/mail/user.nsf",
+        INOTES_COOKIE: "DomAuthSessId=example",
+      }),
+    );
+    const message = await client.readMessage("A1B2C3D4E5F60718293A4B5C6D7E8F90");
+    assert.equal(message.body, "Текст живого письма.");
+    assert.equal(message.bodyAvailable, true);
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+      assert.equal(call.url.searchParams.get("PresetFields"), "s_NoMarkRead;1");
+      assert.match(call.headers.get("accept") ?? "", /text\/html/);
+      assert.match(call.headers.get("referer") ?? "", /iNotes\/Mail/);
+      assert.equal(call.headers.get("sec-fetch-dest"), "iframe");
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("read_message retries Domino's reload shell before parsing message headers", async () => {
+  const calls: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const form = url.searchParams.get("Form") ?? "";
+    calls.push(form);
+    if (form === "s_MailMemoReadBodyContent") {
+      return new Response("<html><body><p>Текст письма.</p></body></html>", { status: 200 });
+    }
+    return calls.length === 1
+      ? new Response('<html><script>location.reload();</script></html>', { status: 200 })
+      : new Response('{"Subject":"Ландшафт","From":"sender@example.com","PostedDate":"2026-09-27T10:00:00Z"}', { status: 200 });
+  };
+  try {
+    const client = new InotesClient(
+      loadConfig({
+        INOTES_BASE_URL: "https://mail.example.com",
+        INOTES_MAIL_PATH: "/mail/user.nsf",
+        INOTES_COOKIE: "DomAuthSessId=example",
+      }),
+    );
+    const message = await client.readMessage("A1B2C3D4E5F60718293A4B5C6D7E8F90");
+    assert.deepEqual(calls, ["l_JSVars", "l_JSVars", "s_MailMemoReadBodyContent"]);
+    assert.equal(message.subject, "Ландшафт");
+    assert.equal(message.from, "sender@example.com");
+    assert.equal(message.date, "2026-09-27T10:00:00Z");
+    assert.equal(message.body, "Текст письма.");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("mark_message_unread posts the iNotes mark-unread command for one UNID", async () => {
+  const calls: Array<{ url: URL; method: string; body: string }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    calls.push({ url, method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : "" });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const client = new InotesClient(
+      loadConfig({
+        INOTES_BASE_URL: "https://mail.example.com",
+        INOTES_MAIL_PATH: "/mail/user.nsf",
+        INOTES_COOKIE: "DomAuthSessId=example; ShimmerS=ET:1&N:abc123nonce",
+      }),
+    );
+    const unid = "A1B2C3D4E5F60718293A4B5C6D7E8F90";
+    assert.deepEqual(await client.markMessageUnread(unid), { unid, unread: true });
+    assert.equal(calls[0]?.method, "POST");
+    assert.match(calls[0]?.url.search ?? "", /EditDocument/);
+    assert.match(calls[0]?.url.search ?? "", /PresetFields=s_NoMarkRead;1/);
+    const fields = new URLSearchParams(calls[0]?.body ?? "");
+    assert.equal(fields.get("h_SetCommand"), "h_ShimmerMarkUnread");
+    assert.equal(fields.get("h_SetDeleteList"), unid);
+    assert.equal(fields.get("Form"), "l_HaikuErrorStatusJSON");
+    assert.equal(fields.get("%%Nonce"), "abc123nonce");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
