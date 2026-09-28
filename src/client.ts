@@ -2,9 +2,11 @@ import { CookieJar } from "./cookies.js";
 import type { InotesConfig } from "./config.js";
 import { fromDominoDateTime, inotesAppointmentClock, toDominoKey } from "./dates.js";
 import {
+  directoryRecipientFromHtml,
   extractNonce,
   htmlToText,
   internetAddress,
+  replyRecipient,
   interpretComposeResponse,
   parseDominoItems,
   forwardSubject,
@@ -241,13 +243,13 @@ export class InotesClient {
     const itemsRes = await this.readMessageForm(id, "l_JSVars");
     const bodyRes = await this.readMessageForm(id, "s_MailMemoReadBodyContent");
     const items = parseDominoItems(itemsRes.text);
-    const parentFrom = internetAddress(items.ReplyTo || items.From || items.INetFrom || "");
-    const sendTo = input.to?.length ? input.to.join(", ") : parentFrom;
+    const resolved = await this.replyTarget(input.folder ?? "($Inbox)", id, items);
+    const sendTo = input.to?.length ? input.to.join(", ") : resolved.to;
     if (!sendTo) {
       return { accepted: false, httpStatus: itemsRes.status, message: "Не удалось определить адрес для ответа." };
     }
-    const subject = input.subject?.trim() || replySubject(items.Subject ?? "");
-    const quoted = bodyRes.status < 400 ? htmlToText(bodyRes.text) : "";
+    const subject = input.subject?.trim() || replySubject(resolved.subject);
+    const quoted = bodyRes.status < 400 && !bodyRes.text.includes("NOTESIDPW") ? htmlToText(bodyRes.text) : "";
     const body = quoted.trim()
       ? `${normalizeNewlines(input.body)}\r\n\r\n${normalizeNewlines(quoted)}`
       : normalizeNewlines(input.body);
@@ -268,7 +270,7 @@ export class InotesClient {
       openUrl,
       {
         to: sendTo,
-        cc: input.replyAll ? replyAllCopy(items, parentFrom) : "",
+        cc: input.replyAll ? replyAllCopy(items, sendTo) : "",
         bcc: "",
         subject,
         body,
@@ -471,6 +473,65 @@ export class InotesClient {
       end: input.end,
       onlineMeetingUrl,
     });
+  }
+
+  /** Document fields, then the folder row, then the directory if the row is only a display name. */
+  private async replyTarget(
+    folder: string,
+    unid: string,
+    items: Record<string, string>,
+  ): Promise<{ to: string; subject: string }> {
+    const fromItems = replyRecipient(items.ReplyTo, items.From, items.INetFrom, items.Principal);
+    let subject = items.Subject ?? "";
+    if (fromItems && subject.trim()) return { to: fromItems, subject };
+    const summary = await this.folderSummary(folder, unid);
+    let to = fromItems;
+    if (!to) {
+      const display = summary.from.trim();
+      to = internetAddress(display) || (display ? await this.directoryRecipient(display) : "") || display;
+    }
+    if (!subject.trim()) subject = summary.subject;
+    return { to, subject };
+  }
+
+  private async folderSummary(folder: string, unid: string): Promise<{ from: string; subject: string }> {
+    const id = unid.toUpperCase();
+    try {
+      for (let start = 1; start <= 301; start += 100) {
+        const list = await this.listMessages({ folder, start, limit: 100 });
+        const hit = list.messages.find((message) => message.unid.toUpperCase() === id);
+        if (hit) return { from: hit.from ?? "", subject: hit.subject ?? "" };
+        if (list.messages.length < 100) break;
+      }
+    } catch {
+      return { from: "", subject: "" };
+    }
+    return { from: "", subject: "" };
+  }
+
+  private async directoryRecipient(query: string): Promise<string> {
+    const needle = query.trim();
+    if (!needle) return "";
+    const tokens = needle.toLowerCase().split(/\s+/).filter((token) => token.length > 1);
+    try {
+      const found = await this.listContacts({ query: needle, limit: 5 });
+      for (const contact of found.contacts) {
+        const hay = `${contact.name ?? ""} ${contact.email ?? ""}`.toLowerCase();
+        if (tokens.length > 0 && !tokens.every((token) => hay.includes(token))) continue;
+        const fromName = internetAddress(contact.name ?? "");
+        if (fromName) return fromName;
+        if (!contact.unid) continue;
+        const doc = await this.authed(
+          "GET",
+          inotesCommandUrl(this.config.baseUrl, "/names.nsf", `0/${contact.unid}/`, "OpenDocument", {}),
+        );
+        const resolved = directoryRecipientFromHtml(doc.text);
+        if (resolved) return resolved;
+      }
+    } catch {
+      return "";
+    }
+    return "";
   }
 
   private async readView(

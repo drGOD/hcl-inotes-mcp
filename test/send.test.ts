@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InotesClient } from "../src/client.js";
 import { loadConfig } from "../src/config.js";
+import { optionalRecipientList, recipientList } from "../src/server.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const read = (name: string) => readFileSync(join(fixtures, name), "utf8");
@@ -143,6 +144,55 @@ test("reply_mail posts the parent reply on the shimmer send path", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("reply_mail uses a Notes name or an smtp address as the recipient", async () => {
+  const original = globalThis.fetch;
+  const parent = "0123456789ABCDEF0123456789ABCDEF";
+  const posted: string[] = [];
+  const respond = (from: string) => {
+    globalThis.fetch = async (input, init) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") {
+        posted.push(typeof init?.body === "string" ? init.body : "");
+        return new Response(read("send-accepted.html"), { status: 200 });
+      }
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.search.includes("Form=l_JSVars")) {
+        return new Response(
+          JSON.stringify([
+            { "@name": "From", text: { "0": from } },
+            { "@name": "Subject", text: { "0": "Проверка" } },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (url.search.includes("Form=s_MailMemoReadBodyContent")) return new Response(read("reply-body.html"), { status: 200 });
+      return new Response(read("compose-form.html"), { status: 200 });
+    };
+  };
+  try {
+    respond("Ivan Example/ORG");
+    const notes = await new InotesClient(config).replyMail({ unid: parent, body: "Ответ." });
+    assert.equal(notes.accepted, true);
+    assert.equal(new URLSearchParams(posted[0]).get("SendTo"), "Ivan Example/ORG");
+    respond("only@example.com");
+    const smtp = await new InotesClient(config).replyMail({ unid: parent, body: "Ответ." });
+    assert.equal(smtp.accepted, true);
+    assert.equal(new URLSearchParams(posted[1]).get("SendTo"), "only@example.com");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("send_mail accepts wrapped recipient items", () => {
+  assert.deepEqual(recipientList.parse([{ item: "a@example.com" }, { item: "b@example.com" }]), [
+    "a@example.com",
+    "b@example.com",
+  ]);
+  assert.deepEqual(recipientList.parse(["a@example.com"]), ["a@example.com"]);
+  assert.deepEqual(recipientList.parse("a@example.com"), ["a@example.com"]);
+  assert.deepEqual(optionalRecipientList.parse([{ item: "c@example.com" }]), ["c@example.com"]);
 });
 
 test("forward_mail posts the parent forward on the shimmer send path", async () => {

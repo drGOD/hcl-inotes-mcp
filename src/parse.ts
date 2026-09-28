@@ -386,10 +386,50 @@ export function parseDominoItems(source: string): Record<string, string> {
   return out;
 }
 
+/** SMTP address or a Notes hierarchical name. Either one is a recipient. */
 export function internetAddress(value: string): string {
-  const angled = value.match(/<([^<>]+)>/);
-  const raw = (angled?.[1] ?? value).trim().replace(/^"+|"+$/g, "");
-  return raw.includes("@") ? raw : "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const angled = trimmed.match(/<([^<>]+)>/);
+  const angledValue = (angled?.[1] ?? "").trim().replace(/^"+|"+$/g, "");
+  if (angledValue.includes("@")) return angledValue;
+  const email = trimmed.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+  const notes = hierarchicalName(trimmed);
+  if (email) return email;
+  return notes;
+}
+
+/** First SMTP address among the fields, otherwise the first Notes name. */
+export function replyRecipient(...values: Array<string | undefined>): string {
+  const found = values.map((value) => internetAddress(value ?? "")).filter(Boolean);
+  return found.find((value) => value.includes("@")) ?? found[0] ?? "";
+}
+
+/** InternetAddress or FullName from a names.nsf person document. */
+export function directoryRecipientFromHtml(html: string): string {
+  const values = new Map<string, string>();
+  for (const match of html.matchAll(/<input\b([^>]*)>/gi)) {
+    const tag = match[1] ?? "";
+    const name = attr(tag, "name");
+    if (!name) continue;
+    values.set(name.toLowerCase(), attr(tag, "value") ?? "");
+  }
+  const read = (name: string) => values.get(name.toLowerCase()) ?? "";
+  return replyRecipient(read("InternetAddress"), read("DisplayMailAddress"), read("FullName"), read("DisplayName"));
+}
+
+function hierarchicalName(value: string): string {
+  for (const piece of value.split(/[;,]/)) {
+    const candidate = piece.trim().replace(/^"+|"+$/g, "");
+    if (isHierarchical(candidate)) return candidate;
+  }
+  return "";
+}
+
+function isHierarchical(value: string): boolean {
+  if (!value || /[\r\n<>]/.test(value)) return false;
+  const parts = value.split("/");
+  return parts.length >= 2 && parts.every((part) => part.trim().length > 0);
 }
 
 export function replySubject(subject: string): string {

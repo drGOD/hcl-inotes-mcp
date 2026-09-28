@@ -7,7 +7,9 @@ import { CookieJar } from "../src/cookies.js";
 import { loadConfig } from "../src/config.js";
 import { fromDominoDateTime, inotesAppointmentClock, toDominoDateTime, toDominoKey } from "../src/dates.js";
 import {
+  directoryRecipientFromHtml,
   internetAddress,
+  replyRecipient,
   interpretComposeResponse,
   parseDominoItems,
   forwardSubject,
@@ -273,6 +275,22 @@ test("config requires the host and does not invent one", () => {
     INOTES_DIRECTORY: "   ",
   });
   assert.equal(blank.directory, undefined);
+});
+
+test("a Notes name and an smtp address both produce a recipient", () => {
+  assert.equal(internetAddress("Ivan Example/ORG"), "Ivan Example/ORG");
+  assert.equal(internetAddress("only@example.com"), "only@example.com");
+  assert.equal(internetAddress('"Иван Петров" <a@example.com>'), "a@example.com");
+  assert.equal(replyRecipient("Ivan Example/ORG", "only@example.com"), "only@example.com");
+  assert.equal(replyRecipient(undefined, "Ivan Example/ORG"), "Ivan Example/ORG");
+  assert.equal(
+    directoryRecipientFromHtml('<input name="FullName" value="Ivan Example/ORG"><input name="InternetAddress" value="only@example.com">'),
+    "only@example.com",
+  );
+  assert.equal(
+    directoryRecipientFromHtml('<input name="FullName" value="Ivan Example/ORG">'),
+    "Ivan Example/ORG",
+  );
 });
 
 test("reads reply fields from Domino @name items", () => {

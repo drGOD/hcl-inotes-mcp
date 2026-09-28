@@ -8,6 +8,21 @@ const unid = z.string().trim().describe("32-символьный UNID докум
 const limit = z.number().int().min(1).max(100).optional().describe("Сколько записей вернуть. По умолчанию 25.");
 const start = z.number().int().min(1).optional().describe("Смещение, с 1, как в ReadViewEntries.");
 
+const recipientItem = z.union([
+  z.string().trim().min(1),
+  z.object({ item: z.string().trim().min(1) }).transform((value) => value.item),
+]);
+
+/** A recipient list: one string, a string array, or MCP-wrapped `{item: string}` elements. */
+export const recipientList = z.union([
+  z.string().trim().min(1).transform((value) => [value]),
+  z.array(recipientItem).min(1),
+]);
+
+export const optionalRecipientList = z
+  .union([z.string().trim().min(1).transform((value) => [value]), z.array(recipientItem)])
+  .optional();
+
 export function createServer(client: InotesClient): McpServer {
   const server = new McpServer({ name: "inotes", version: "1.0.0" });
 
@@ -83,9 +98,9 @@ export function createServer(client: InotesClient): McpServer {
       title: "Отправить письмо",
       description: "Новое письмо через форму iNotes h_PageUI (Memo). Получатели — адреса или имена Notes.",
       inputSchema: z.object({
-        to: z.array(z.string().trim().min(1)).min(1),
-        cc: z.array(z.string().trim().min(1)).optional(),
-        bcc: z.array(z.string().trim().min(1)).optional(),
+        to: recipientList,
+        cc: optionalRecipientList,
+        bcc: optionalRecipientList,
         subject: z.string().trim().min(1).max(500),
         body: z.string().min(1).max(200_000),
       }),
@@ -104,7 +119,7 @@ export function createServer(client: InotesClient): McpServer {
         body: z.string().min(1).max(200_000),
         replyAll: z.boolean().optional(),
         folder: folder.optional(),
-        to: z.array(z.string().trim().min(1)).optional(),
+        to: optionalRecipientList,
         subject: z.string().trim().min(1).max(500).optional(),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
@@ -119,7 +134,7 @@ export function createServer(client: InotesClient): McpServer {
       description: "Пересылка через форму iNotes h_Forward.",
       inputSchema: z.object({
         unid,
-        to: z.array(z.string().trim().min(1)).min(1),
+        to: recipientList,
         comment: z.string().max(200_000).optional(),
         folder: folder.optional(),
       }),
@@ -199,7 +214,7 @@ export function createServer(client: InotesClient): McpServer {
         onlineMeetingUrl: z.string().trim().max(2000).optional().describe("Ссылка «Сетевое собрание», https URL."),
         kind: z.enum(["appointment", "meeting"]).optional(),
         allDay: z.boolean().optional(),
-        attendees: z.array(z.string().trim().min(1)).optional(),
+        attendees: optionalRecipientList,
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
